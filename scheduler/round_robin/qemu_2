@@ -1,0 +1,7 @@
+qemu-system-x86_64 -s -hda /dev/zero -kernel arch/x86/boot/bzImage -serial stdio -append "boot_delay=2"
+
+qemu-system-x86_64 -m 2G -s -hda ../linux.img -kernel arch/x86/boot/bzImage -serial stdio -append "root=/dev/sda1"
+
+http://www.yonch.com/tech/84-debugging-the-linux-kernel-with-qemu-and-eclipse
+
+http://linux-tips.org/t/booting-from-an-iso-image-using-qemu/136

@@ -1,15 +1,42 @@
+Qemu commands
+=============
+
 qemu-system-x86_64 -s -hda /dev/zero -kernel arch/x86/boot/bzImage -serial stdio -append "boot_delay=2"
 
-qemu-system-x86_64 -m 2G -s -hda ../linux.img -kernel arch/x86/boot/bzImage -serial stdio -append "root=/dev/sda1"
+qemu-system-x86_64 -m 2G -s -hda ../linux.img -kernel arch/x86/boot/bzImage -enable-kvm -serial stdio -append "root=/dev/sda1"
+
+qemu-system-x86_64 -m 2G -s -hda ~/operating_systems/linux_distros/Lubuntu/lubuntu.img -enable-kvm -kernel arch/x86/boot/bzImage -serial stdio -append "root=/dev/sda1 quiet 3"    # "quiet 3" boots into command line mode wthout GUI
+
+Fast kernel testing
+===================
+
+http://ncmiller.github.io/2016/05/14/linux-and-qemu.html
+https://mgalgs.github.io/2015/05/16/how-to-build-a-custom-linux-kernel-for-qemu-2015-edition.html
+
+
+Build the kernel
+================
+
+make clean
+make defconfig
+make -j7
+
+
+Links
+=====
 
 http://www.yonch.com/tech/84-debugging-the-linux-kernel-with-qemu-and-eclipse
 
 http://linux-tips.org/t/booting-from-an-iso-image-using-qemu/136
 
+http://wiki.eclipse.org/HowTo_use_the_CDT_to_navigate_Linux_kernel_source
 
+https://github.com/Stolz/linux-cheat-sheets/blob/master/minimal-kernel.config
 
 Qemu booting with ISO image
 ===========================
+
+http://www.yonch.com/tech/84-debugging-the-linux-kernel-with-qemu-and-eclipse
 
 Qemu has two operating mode named full system emulation and user mode emulation. If you want to simulate whole system not just the cpu (like a PC) you need to use full system emulation mode.
 
@@ -32,8 +59,79 @@ In this example we’re created an image of 10 GB. Now we can use this file as h
 qemu-system-x86_64 -boot d -cdrom image.iso -m 512 -hda mydisk.img
 
 
+Indexing the kernel with Eclipse
+================================
+
+http://wiki.eclipse.org/HowTo_use_the_CDT_to_navigate_Linux_kernel_source
+
+HowTo use the CDT to navigate Linux kernel source
+Here are some steps that I've found to get the CDT to work well with the Linux kernel source. If you exclude some of these steps, it may still work to a large degree, but some things may not work exactly right; for example it may find the wrong include file for a C file.
+
+Anyway, as you do these steps, I think you may understand how they assist the indexer to do a good job for the Linux kernel source.
+
+Disclaimer: these steps were last updated for Eclipse Oxygen 4.7.2 + CDT 9.4.0, and originally developed for Eclipse 3.5.1 + CDT 6.0.0
+
+Download and install Eclipse plus the CDT.
+Configure and build your kernel to define CONFIG_* and generate autoconf.h. This can be done before or after downloading and installing Eclipse.
+Ensure that you have the right kernel source (e.g. make sure you are on the right git branch). If you check out another branch later, that's ok, but you will need to re-index the source, and that takes about 20 minutes.
+Start up Eclipse.
+Click File->New->C Project
+Fill in a project name like my_kernel
+Uncheck the Use default location box and type in the root directory of your kernel into the Location box.
+In the Project type: pane, click the Makefile project and select Empty Project
+On the right side, select Linux GCC
+Click Advanced settings... and a Properties dialog will pop up.
+Note: At this point, latest Eclipse versions (e.g. Oxygen) will aggressively start indexing your project, which can make Eclipse painfully slow for the rest of the configuration steps below -- especially if the desire is to only index a small relevant part of the kernel. To mitigate that, temporarily disable indexing now by opening C/C++ General section, click on Indexer, click on Enable project-specific settings, then unmark the Enable indexer option.
+Open the C/C++ General selection on the left.
+Click on Preprocessor Include Paths
+Select GNU C in the Languages list
+Select CDT User Setting Entries in the Setting Entries list
+Click on Add.... Choose Preprocessor Macros File from the top left dropdown, Project Path from the top right dropdown, and enter "include/linux/kconfig.h" into the File text box. Note 1: For older kernels (e.g. 4.1.12, 4.2.7, or less), selecting "include/generated/autoconf.h" works better. In newer kernels, selecting kconfig.h is better as this file includes <generated/autoconf.h> and also makes sure that tests such as IS_ENABLED(option) are correctly expanded by the CDT scanner. Note 2: For kernels older than 2.6.33, the location of autoconf.h is include/linux/autoconf.h
+Also add any other macros files you are using.
+Click on Indexer
+Checkmark the Enable project specific setttings box.
+Uncheck Index source files not included in the build
+Click on Paths and Symbols on the left.
+Select the Includes tab and then select GNU C
+Click Add...
+Click Workspace... then select your kernel's include, and include/uapi directories
+Do another Add, Workspace and add both arch/architecture/include, and arch/architecture/include/uapi directories. e.g., arch/powerpc/include and arch/powerpc/include/uapi (The UAPI directories are due to the kernel's user/kernel header split covered here in-detail)
+Click the # Symbols tab
+Click Add...
+Set the name to __KERNEL__
+Set the value to 1 and click OK
+Click the Source Location tab
+Click the plus sign next to your project name.
+Select the Filter item and click Edit Filter...
+Click Add Multiple... and then select all of the arch/* directories in your kernel source that will not be used (i.e. all the ones that are not for the architecture you are using)
+Click OK and OK again to dismiss that dialog.
+Under C/C++ General, select Preprocessor Include Paths, Macros etc.
+Click the Providers tab and select CDT GCC Built-in Compiler Settings
+Uncheck Use global provider shared between projects
+Append -nostdinc to the curretly-existing Command to get compiler specs. The kernel is a free-standing environment by ISO C99 definition. That is, it does not want to be polluted, and obviously cannot work with, the "host" header files and libraries.
+Also append -iwithprefix include to the Command to get compiler specs above. Rationale is, -nostdinc above asked gcc to not search the standard system directories for header files. But the Linux Kernel depends on GCC-provided "freestanding environment" headers like stdarg.h, stdbool.h, etc., and which are typically hosted by GCC under /lib/gcc/<arch>/<version>/include. Thus the append.
+Check Allocate console in the Console View so you can see that this is working
+Click OK on the Properties dialog.
+Note: If you temporarily disabled indexing as earlier recommended. This is the right time to re-enable it. Under C/C++ General, click on Indexer, and mark the Enable indexer option.
+Click Finish on the C Project dialog.
+The Project will index automatically.
+On a platter drive indexing will take upwards of 20 minutes to complete, on a SSD indexing will take about 5 minutes to complete.
+Notes:
+
+Adding include and arch/architecture/include only gets you a couple of the common include paths. To fully index all of the kernel, you would have to add dozens of paths, unfortunately. For this reason, I advise against using PTP's remote indexing capability for the linux kernel, because what happens is that it will report thousands of errors in locating header files, and the process of reporting those errors over a possibly long-latency link, will cause the indexing to take many hours.
+If you change any of your CONFIG_* settings, in order for Eclipse to recognize those changes, you may need to do a "build" from within Eclipse. Note, this does not mean to re-build the index; this means to build the kernel, by having Eclipse invoke make (this is normally bound to the Ctrl-B key in Eclipse). Eclipse should automatically detect changes to include/generated/autoconf.h, reread the compilation #defines it uses, and reindex.
+The background color of "Quick Context View" will be dark if the Ambiance theme in Ubuntu is selected.
+For some people, Eclipse may fail to index the kernel with a out of memory error. The fix seems to be to start eclipse with the arguments: eclipse -vmargs -Xmx650M
+Corey Ashford cjashfor@us.ibm.com
+
+Updated by Adam Duskett Aduskett@gmail.com
+
+Continuous kernel-related updates (from v2.6.33 up to v4.15) by Ahmed S. Darwish darwish.07@gmail.com
+
 Qemu and Eclipse debugging
 ==========================
+
+http://linux-tips.org/t/booting-from-an-iso-image-using-qemu/136
 
 Debugging the Linux kernel with Qemu and Eclipse
 Posted on August 12, 2013 by yonch

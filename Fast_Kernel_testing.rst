@@ -8,6 +8,8 @@ Content
 Fast linux kernel testing with qemu
 This is the process I followed on my Fedora 23 host machine to build a small/minimal vanilla Linux kernel and test in Qemu (based on this blog post). This will provide a safe sandbox in which to test kernel changes, and is generally faster than developing natively on the host machine. Qemu will boot the kernel image directly in the emulated system.
 
+sudo apt-get install qemu-system
+
 Install required build tools on host machine
 dnf install ncurses-devel kernel-devel kernel-headers openssl-devel
 dnf install gcc dnf install gcc-c++ glibc-static

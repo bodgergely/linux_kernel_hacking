@@ -35,6 +35,7 @@ Enable building BusyBox as a static binary:
 -> Busybox Settings
   -> Build Options
 [*] Build BusyBox as a static binary (no shared libs)
+[] Support RPC services - disable it if you get compilation error due to some bindport
 Build and install busybox (local install, no sudo required)
 cd $TOP/build/busybox-x86
 make -j2

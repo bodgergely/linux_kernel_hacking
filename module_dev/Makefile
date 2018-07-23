@@ -1,7 +1,8 @@
 obj-m := hello_world.o
 hello_world-objs := main_hello.o
 
-KERNEL_HEADERS_LIB=/lib/modules/$(shell uname -r)/build
+#KERNEL_HEADERS_LIB=/lib/modules/$(shell uname -r)/build
+KERNEL_HEADERS_LIB=~/busybox/build/linux-master
 
 
 all:

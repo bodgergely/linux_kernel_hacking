@@ -1,6 +1,10 @@
-LINUX_SRC=$HOME/linux/3.7.1/linux-3.7.1/
+LINUX_SRC=$WORKSPACE/linux/
 BUSYBOX_DIR=$HOME/busybox
+
+BRANCH=master
 
 cd $LINUX_SRC
 
-make O=$BUSYBOX_DIR/build/linux-3.7.1 -j4
+
+
+make O=$BUSYBOX_DIR/build/linux-$BRANCH -j4

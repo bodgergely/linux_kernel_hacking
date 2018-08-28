@@ -3,7 +3,7 @@
 #from hardrive - normal run
 qemu-system-i386 \
     -m 2G -s -hda ~/operating_systems/linux_distros/Lubuntu/lubuntu_32.img \
-    -kernel ~/busybox/build/linux-x86-basic/arch/i386/boot/bzImage \
+    -kernel ~/busybox/build/linux-master/arch/i386/boot/bzImage \
     -serial stdio \
     -append "root=/dev/sda1 console=ttyS0 nokaslr" 
 

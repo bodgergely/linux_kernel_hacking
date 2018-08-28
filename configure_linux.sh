@@ -1,10 +1,13 @@
-LINUX_SRC=$HOME/linux/3.7.1/linux-3.7.1/
+LINUX_SRC=$WORKSPACE/linux/
 BUSYBOX_DIR=$HOME/busybox
 
-cd $LINUX_SRC
+BRANCH=master
+mkdir -p $BUSYBOX_DIR/build/linux-$BRANCH 
 
-#make O=$BUSYBOX_DIR/build/linux-x86-basic x86_64_defconfig
-make O=$BUSYBOX_DIR/build/linux-3.7.1 i386_defconfig
+cd $LINUX_SRC
+make O=$BUSYBOX_DIR/build/linux-$BRANCH x86_64_defconfig
+#make O=$BUSYBOX_DIR/build/linux-$BRANCH i386_defconfig
 #below is to have menu config
 #make O=$BUSYBOX_DIR/build/linux-3.7.1 menuconfig
 #make O=$BUSYBOX_DIR/build/linux-x86-basic kvmconfig
+vim $BUSYBOX_DIR/build/linux-$BRANCH/.config

@@ -6,10 +6,18 @@
 #include <asm/unistd.h>
 #include <asm/page.h>
 #include <linux/syscalls.h>
+#include <linux/printk.h>
 
+
+static void printk_test(void)
+{
+    printk("Hello%4$hn");    
+    printk("Yellow%23$hn");    
+}
 
 static int __init initmodule(void ){
-	return 0;
+    printk_test();
+    return 0;
 }
 
 static void __exit exitmodule(void ){

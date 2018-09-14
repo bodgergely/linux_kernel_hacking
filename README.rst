@@ -56,7 +56,7 @@ qemu-img create mydisk.img 10G
 
 In this example we’re created an image of 10 GB. Now we can use this file as harddisk in our qemu boot:
 
-qemu-system-x86_64 -boot d -cdrom image.iso -m 512 -hda mydisk.img
+qemu-system-x86_64 -enable-kvm -boot d -cdrom image.iso -m 512 -hda mydisk.img
 
 
 Indexing the kernel with Eclipse

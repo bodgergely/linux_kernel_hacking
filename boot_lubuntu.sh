@@ -5,6 +5,5 @@ qemu-system-x86_64 \
     -m 2G -s -hda ~/operating_systems/linux/lubuntu/lubuntu_64.img \
     -kernel ~/busybox/build/linux-master/arch/x86_64/boot/bzImage \
     -serial stdio \
-    -enable-kvm \
     -append "root=/dev/sda1 console=ttyS0 nokaslr" 
 

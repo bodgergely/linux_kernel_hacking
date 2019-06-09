@@ -1,0 +1,2 @@
+alias boot='sudo ./boot_x64.sh'
+alias debug='./gdb_vmlinux.sh'

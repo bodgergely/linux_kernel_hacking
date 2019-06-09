@@ -11,8 +11,7 @@
 
 static void printk_test(void)
 {
-    printk("Hello%4$hn");    
-    printk("Yellow%23$hn");    
+    printk("Hello World!\n");    
 }
 
 static int __init initmodule(void ){

@@ -268,3 +268,22 @@ Now, the offending function will be in the backtrace. For example:
 (gdb) backtrace  #0  panic (fmt=&lt;optimized out&gt;) at kernel/panic.c:70 #1  0xffffffff8169c71a in oops_end (flags=582, regs=0xffff88003fc03d38,      signr=9) at arch/x86/kernel/dumpstack.c:240 &lt; SNIPPED SOME LINES &gt; #6  0xffffffff8169f3de in do_page_fault (regs=&lt;optimized out&gt;,      error_code=&lt;optimized out&gt;) at arch/x86/mm/fault.c:1231 #7  &lt;signal handler called&gt; #8  bstats_update (bstats=0xffff88003cd1f8a0, skb=0x0)     at include/net/sch_generic.h:483 #9  qdisc_bstats_update (skb=0x0, sch=0xffff88003cd1f800)     at include/net/sch_generic.h:490 #10 fastpass_dequeue (sch=0xffff88003cd1f800) at net/sched/sch_fastpass.c:519 #11 0xffffffff815be58e in dequeue_skb (q=0xffff88003cd1f800) &lt; MORE SNIPPED &gt; 
 The backtrace enables exploring the code that led to the panic; we can examine individual frames, for example issuing “frame 10”, listing code with repeated calls to “list” or “list -“, and printing variables with “print varname”.
 
+
+Kernel tracing
+==============
+
+ftrace
+------
+- trace-cmd
+- kernelshark
+
+
+
+
+
+
+
+
+
+
+

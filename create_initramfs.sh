@@ -12,7 +12,7 @@ touch init
 echo "#!/bin/sh" >> init
 echo "mount -t proc none /proc" >> init
 echo "mount -t sysfs none /sys" >> init
-echo "echo -e \"\nBoot took $(cut -d' ' -f1 /proc/uptime) seconds\n\"" >> init
+echo "echo -e \"\nBoot took \$(cut -d' ' -f1 /proc/uptime) seconds\n\"" >> init
 echo "exec /bin/sh" >> init
 chmod +x init
 

@@ -33,6 +33,10 @@ http://wiki.eclipse.org/HowTo_use_the_CDT_to_navigate_Linux_kernel_source
 
 https://github.com/Stolz/linux-cheat-sheets/blob/master/minimal-kernel.config
 
+Networking:
+https://david.wragg.org/blog/2014/09/qemu-kernel-debugging.html
+
+
 Qemu booting with ISO image
 ===========================
 

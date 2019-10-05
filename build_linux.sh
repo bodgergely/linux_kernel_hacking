@@ -5,4 +5,4 @@ BRANCH=master
 
 cd $LINUX_SRC
 
-make O=$BUSYBOX_DIR/build/linux-$BRANCH -j4
+make O=$BUSYBOX_DIR/build/linux-$BRANCH -j`nproc`

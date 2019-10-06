@@ -1,0 +1,77 @@
+RCU - Read Copy Update
+======================
+
+Documentation/RCU/whatisRCU.rst
+
+What is RCU:
+------------
+
+https://lwn.net/Articles/253651/
+https://lwn.net/Articles/262464/
+https://lwn.net/Articles/263130/
+https://lwn.net/Articles/264090/
+
+What is RCU?
+------------
+Read-copy update (RCU) is a synchronization API that is sometimes used in place of reader-writer locks.
+
+At its core, RCU is nothing more nor less than an API that 
+    * supports publication and subscription for insertions, 
+    * waiting for all RCU readers to complete
+    * maintenance of multiple versions.
+
+RCU achieves scalability improvements by allowing reads to occur concurrently with updates.
+
+Concurrent reads with updates.
+
+RCU supports concurrency between a single updater and multiple readers.
+
+One key attribute of RCU is the ability to safely scan data, even though that data is being modified concurrently. 
+
+RCU is a way of waiting for RCU readers to finish.
+
+In its most basic form, RCU is a way of waiting for things to finish. Of course, there are a great many other ways of waiting for things to finish, including reference counts, reader-writer locks, events, and so on. The great advantage of RCU is that it can wait for each of (say) 20,000 different things without having to explicitly track each and every one of them, and without having to worry about the performance degradation, scalability limitations, complex deadlock scenarios, and memory-leak hazards that are inherent in schemes using explicit tracking. 
+
+Example:
+
+  1 struct foo {
+  2   struct list_head list;
+  3   int a;
+  4   int b;
+  5   int c;
+  6 };
+  7 LIST_HEAD(head);
+  8 
+  9 /* . . . */
+ 10 
+ 11 p = search(head, key);
+ 12 if (p == NULL) {
+ 13   /* Take appropriate action, unlock, and return. */
+ 14 }
+ 15 q = kmalloc(sizeof(*p), GFP_KERNEL);
+ 16 *q = *p;                                // READ
+ 17 q->b = 2;                               // COPY
+ 18 q->c = 3;                               // ...
+ 19 list_replace_rcu(&p->list, &q->list);   // UPDATE
+ 20 synchronize_rcu();
+ 21 kfree(p);
+
+Lines 19, 20, and 21 implement the three steps called out above. Lines 16-19 gives RCU ("read-copy update") its name: 
+While permitting concurrent reads, line 16 copies and lines 17-19 do an update. 
+
+When a given CPU executes a context switch, we are guaranteed that any prior RCU read-side critical sections will have completed. 
+This means that as soon as each CPU has executed at least one context switch, all prior RCU read-side critical sections 
+are guaranteed to have completed, meaning that synchronize_rcu() can safely return. 
+
+Guarantee:
+----------
+An element that might be referenced by a given reader must remain intact while that reader remains in its RCU read-side critical section.
+
+
+Although RCU offers significant performance advantages for read-mostly workloads, one of the primary reasons for creating RCU 
+in the first place was in fact its immunity to read-side deadlocks. 
+This immunity stems from the fact that RCU read-side primitives do not block, spin, or even do backwards branches, 
+so that their execution time is deterministic.
+It is therefore impossible for them to participate in a deadlock cycle. 
+
+

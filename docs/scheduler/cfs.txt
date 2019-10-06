@@ -1,6 +1,13 @@
 Completely Fair Scheduler
 =========================
 
+Man page
+--------
+
+man 7 sched
+man 7 cpuset
+
+
 Documentation/scheduler/sched-design-CFS.rst
 
 TLDR
@@ -50,4 +57,54 @@ only one central tunable (you have to switch on CONFIG_SCHED_DEBUG):
 which can be used to tune the scheduler from "desktop" (i.e., low latencies) to
 "server" (i.e., good batching) workloads.  It defaults to a setting suitable
 for desktop workloads.  SCHED_BATCH is handled by the CFS scheduler module too.
+
+
+Scheduler code
+==============
+
+Time accounting
+---------------
+Nanosecs are used for time accounting.
+
+fair.c has the update_curr() method that is called to update cpu time for the curr task.
+
+void update_process_times(int usertick) is timer.c is called by the timer interrupt!!! (kernel/time/tick-sched.c:tick_sched_handle)
+    - calls run_posix_cpu_timers() in posix-cpu-timers.c
+        - this file has the posix_cpu_timers_ functions
+        - calls the thread_group_cputime() in kernel/sched/cputime.c !!!!
+            - calls task_sched_runtime() in sched/core.c
+                - calls the registered scheduler class update_curr() to update the running time
+
+
+Timer ticks
+-----------
+Docs/timers/no_hz.rst - IMPORTANT!!!
+CONFIG_NO_HZ_COMMON - most likely set to yes - see the doc 
+
+    1. Never omit timer interrupts
+    2. Omit timer interrupts when idle the CPU (this is the default setting nowadays - CONFIG_NO_HZ_COMMON=y)
+    3. Omit the timer when only one task is runnable - adaptive-ticks!!
+
+nohz=off boot parameter can turn off the second option.
+"nohz_full=1,6-8" says that CPUs 1, 6, 7, and 8 are to be adaptive-ticks
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 

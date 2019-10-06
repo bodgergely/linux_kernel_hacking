@@ -1,0 +1,9 @@
+CPU set
+=======
+
+man 7 cpuset
+
+The cpuset filesystem is a pseudo-filesystem interface to the kernel cpuset mechanism, 
+which is used to control the processor placement and memory placement of processes. 
+It is commonly mounted at /dev/cpuset.
+

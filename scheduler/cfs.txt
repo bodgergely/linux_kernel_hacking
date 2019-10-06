@@ -1,0 +1,53 @@
+Completely Fair Scheduler
+=========================
+
+Documentation/scheduler/sched-design-CFS.rst
+
+TLDR
+----
+
+Run the task with the smallest p->se.vruntime value.
+
+
+Virtual Runtime concept
+-----------------------
+
+On real hardware, we can run only a single task at once, so we have to
+introduce the concept of "virtual runtime."  The virtual runtime of a task
+specifies when its next timeslice would start execution on the ideal
+multi-tasking CPU described above.  In practice, the virtual runtime of a task
+is its actual runtime normalized to the total number of running tasks.
+
+
+Task picking logic
+------------------
+
+CFS's task picking logic is based on this **p->se.vruntime** value and it is thus
+very simple: it always tries to run the task with the smallest p->se.vruntime
+value (i.e., the task which executed least so far).  CFS always tries to split
+up CPU time between runnable tasks as close to "ideal multitasking hardware" as
+possible.
+
+
+Summing up, CFS works like this: it runs a task a bit, and when the task
+schedules (or a scheduler tick happens) the task's CPU usage is "accounted
+for": the (small) time it just spent using the physical CPU is added to
+p->se.vruntime.  Once p->se.vruntime gets high enough so that another task
+becomes the "leftmost task" of the time-ordered rbtree it maintains (plus a
+small amount of "granularity" distance relative to the leftmost task so that we
+do not over-schedule tasks and trash the cache), then the new leftmost task is
+picked and the current task is preempted.
+
+
+
+CFS uses nanosecond granularity accounting and does not rely on any jiffies or
+other HZ detail.  Thus the CFS scheduler has no notion of "timeslices" in the
+way the previous scheduler had, and has no heuristics whatsoever.  There is
+only one central tunable (you have to switch on CONFIG_SCHED_DEBUG):
+
+   /proc/sys/kernel/sched_min_granularity_ns
+
+which can be used to tune the scheduler from "desktop" (i.e., low latencies) to
+"server" (i.e., good batching) workloads.  It defaults to a setting suitable
+for desktop workloads.  SCHED_BATCH is handled by the CFS scheduler module too.
+

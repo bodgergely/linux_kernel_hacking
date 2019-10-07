@@ -11,6 +11,19 @@ https://lwn.net/Articles/262464/
 https://lwn.net/Articles/263130/
 https://lwn.net/Articles/264090/
 
+RCU
+---
+
+The name comes from the way that RCU is used to update a linked structure in place. A thread wishing to do this uses the following steps:
+
+    * create a new structure,
+    * copy the data from the old structure into the new one, and save a pointer to the old structure,
+    * modify the new, copied, structure
+    * update the global pointer to refer to the new structure, and then
+    * sleep until the operating system kernel determines that there are no readers left using the old structure, for example, in the Linux kernel, by using synchronize_rcu().
+
+    * When the thread which made the copy is awakened by the kernel, it can safely deallocate the old structure. 
+
 What is RCU?
 ------------
 Read-copy update (RCU) is a synchronization API that is sometimes used in place of reader-writer locks.

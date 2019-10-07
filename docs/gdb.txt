@@ -1,0 +1,13 @@
+use the apropos lx
+
+Lots of useful gdb scripts, function etc defined for the kernel
+
+functions can be called like: $kernel_func("data")
+
+p $lx_per_cpu("tick_cpu_sched")     -> this will grab the PER CPU variable tick_cpu_sched
+                                        which is of type struct tick_sched
+
+                                    See the DEFINE_PER_CPU macros in the source for per cpu data
+
+p $lx_current().comm    -> prints the task name
+

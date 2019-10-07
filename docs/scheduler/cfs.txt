@@ -1,14 +1,53 @@
 Completely Fair Scheduler
 =========================
 
+Documentation/scheduler/sched-design-CFS.rst
+
+Links:
+------
+
+https://blog.shichao.io/2015/07/22/relationships_among_nice_priority_and_weight_in_linux_kernel.html
+
+
 Man page
 --------
 
 man 7 sched
 man 7 cpuset
+man 2 setpriority
+
+In general see:
+
+man sched_
 
 
-Documentation/scheduler/sched-design-CFS.rst
+Scheduler debugging, tuning
+---------------------------
+
+/proc/sched_debug has lots of internal info.
+
+The below files can be set/get with sysctl
+
+/proc/sys/kernel/sched_autogroup_enabled
+/proc/sys/kernel/sched_cfs_bandwidth_slice_us
+/proc/sys/kernel/sched_child_runs_first
+/proc/sys/kernel/sched_domain
+/proc/sys/kernel/sched_latency_ns
+/proc/sys/kernel/sched_migration_cost_ns
+/proc/sys/kernel/sched_min_granularity_ns
+/proc/sys/kernel/sched_nr_migrate
+/proc/sys/kernel/sched_rr_timeslice_ms
+/proc/sys/kernel/sched_rt_period_us
+/proc/sys/kernel/sched_rt_runtime_us
+/proc/sys/kernel/sched_schedstats
+/proc/sys/kernel/sched_time_avg_ms
+/proc/sys/kernel/sched_tunable_scaling
+/proc/sys/kernel/sched_wakeup_granularity_ns
+
+Read them:
+for f in `find /proc/sys/kernel -name "sched_*"`; do echo $f; cat $f; done
+
+
 
 TLDR
 ----
@@ -62,6 +101,16 @@ for desktop workloads.  SCHED_BATCH is handled by the CFS scheduler module too.
 Scheduler code
 ==============
 
+kernel/sched/core.c
+kernel/sched/fair.c - this is the CFS specific scheduler class code
+
+NICE_TO_PRIO - macro to convert nice to prio
+PRIO_TO_NICE
+
+Relation: prio = nice + 120
+
+
+
 Time accounting
 ---------------
 Nanosecs are used for time accounting.
@@ -76,6 +125,22 @@ void update_process_times(int usertick) is timer.c is called by the timer interr
                 - calls the registered scheduler class update_curr() to update the running time
 
 
+sched_prio_to_weight[40] contains the priority-to-weight mappings in sched/core.c!
+
+const int sched_prio_to_weight[40] = {
+ /* -20 */     88761,     71755,     56483,     46273,     36291,
+ /* -15 */     29154,     23254,     18705,     14949,     11916,
+ /* -10 */      9548,      7620,      6100,      4904,      3906,
+ /*  -5 */      3121,      2501,      1991,      1586,      1277,
+ /*   0 */      1024,       820,       655,       526,       423,
+ /*   5 */       335,       272,       215,       172,       137,
+ /*  10 */       110,        87,        70,        56,        45,
+ /*  15 */        36,        29,        23,        18,        15,
+};
+
+The weight is roughly equivalent to 1024/(1.25)^(nice).
+There is a per-CPU scheduler. Loadbalancing is required when there are multiple CPUs. Each CPU has its runqueue.
+
 Timer ticks
 -----------
 Docs/timers/no_hz.rst - IMPORTANT!!!
@@ -89,6 +154,9 @@ nohz=off boot parameter can turn off the second option.
 "nohz_full=1,6-8" says that CPUs 1, 6, 7, and 8 are to be adaptive-ticks
 
 
+timer.c
+tick-sched.c
+hrtimer.c
 
 
 

@@ -12,4 +12,5 @@ make O=$BUSYBOX_DIR/build/linux-$BRANCH x86_64_defconfig
 #make O=$BUSYBOX_DIR/build/linux-x86-basic kvmconfig
 echo "CONFIG_DEBUG_INFO=y" >> $BUSYBOX_DIR/build/linux-$BRANCH/.config
 echo "CONFIG_8139CP=y" >> $BUSYBOX_DIR/build/linux-$BRANCH/.config
+echo "CONFIG_GDB_SCRIPTS=y" >> $BUSYBOX_DIR/build/linux-$BRANCH/.config
 vim $BUSYBOX_DIR/build/linux-$BRANCH/.config

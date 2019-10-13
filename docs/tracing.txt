@@ -1,0 +1,26 @@
+Kernel Tracing
+==============
+
+/sys/kernel/debug/tracing
+-------------------------
+
+You can trace events that are named by TRACE_EVENT macro.
+
+Trace an event:
+    - write event name to set_event
+    - read trace_pipe
+
+
+$ echo workqueue:workqueue_queue_work > /sys/kernel/debug/tracing/set_event
+$ cat /sys/kernel/debug/tracing/trace_pipe > out.txt
+	(wait a few secs)
+	^C
+
+Trace scheduler events:
+    sched.h defines with TRACE_EVENT quite a few.
+
+    TRACE_EVENT(sched_switch
+
+$ echo sched:sched_switch > /sys/kernel/debug/tracing/set_event
+$ cat /sys/kernel/debug/tracing/trace_pipe > /tmp/sched_traces.txt
+$ cat /tmp/sched_traces.txt | awk '{print $11}' | awk -F'=' '{print $2}' | sort | uniq -c | less

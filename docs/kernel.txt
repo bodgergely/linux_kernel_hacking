@@ -1,23 +1,38 @@
 General kernel doc
 ==================
+==================
+
+
+Links
+=====
+
+Proc filesystem:
+----------------
+http://tldp.org/LDP/Linux-Filesystem-Hierarchy/html/proc.html
+
+
+
+
 
 Softirq
--------
+=======
 interrupt.h
 softirq.c
 
 To see softirq changes in action:
 $ watch -n 1 cat /proc/softirqs
 
+Interrupts
+==========
+$ watch -n 0.1 cat /proc/interrupts
+
 Command line params
---------------------
+===================
 $ cat /proc/cmdline
 
 
-
-
 Work queues, kworker
---------------------
+===================
 
 linux/workqueue.h
 kernel/workqueue.c

@@ -1,0 +1,3569 @@
+<?xml version="1.0" standalone="no"?>
+<!DOCTYPE svg PUBLIC "-//W3C//DTD SVG 1.1//EN" "http://www.w3.org/Graphics/SVG/1.1/DTD/svg11.dtd">
+<svg version="1.1" width="2000" height="990" onload="init(evt)" viewBox="0 0 2000 990" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink">
+<!-- Flame graph stack visualization. See https://github.com/brendangregg/FlameGraph for latest version, and http://www.brendangregg.com/flamegraphs.html for examples. -->
+<!-- NOTES:  -->
+<defs>
+	<linearGradient id="background" y1="0" y2="1" x1="0" x2="0" >
+		<stop stop-color="#eeeeee" offset="5%" />
+		<stop stop-color="#eeeeb0" offset="95%" />
+	</linearGradient>
+</defs>
+<style type="text/css">
+	text { font-family:Verdana; font-size:12px; fill:rgb(0,0,0); }
+	#search { opacity:0.1; cursor:pointer; }
+	#search:hover, #search.show { opacity:1; }
+	#subtitle { text-anchor:middle; font-color:rgb(160,160,160); }
+	#title { text-anchor:middle; font-size:17px}
+	#unzoom { cursor:pointer; }
+	#frames > *:hover { stroke:black; stroke-width:0.5; cursor:pointer; }
+	.hide { display:none; }
+	.parent { opacity:0.5; }
+</style>
+<script type="text/ecmascript">
+<![CDATA[
+	"use strict";
+	var details, searchbtn, unzoombtn, matchedtxt, svg, searching;
+	function init(evt) {
+		details = document.getElementById("details").firstChild;
+		searchbtn = document.getElementById("search");
+		unzoombtn = document.getElementById("unzoom");
+		matchedtxt = document.getElementById("matched");
+		svg = document.getElementsByTagName("svg")[0];
+		searching = 0;
+	}
+
+	window.addEventListener("click", function(e) {
+		var target = find_group(e.target);
+		if (target) {
+			if (target.nodeName == "a") {
+				if (e.ctrlKey === false) return;
+				e.preventDefault();
+			}
+			if (target.classList.contains("parent")) unzoom();
+			zoom(target);
+		}
+		else if (e.target.id == "unzoom") unzoom();
+		else if (e.target.id == "search") search_prompt();
+	}, false)
+
+	// mouse-over for info
+	// show
+	window.addEventListener("mouseover", function(e) {
+		var target = find_group(e.target);
+		if (target) details.nodeValue = "Function: " + g_to_text(target);
+	}, false)
+
+	// clear
+	window.addEventListener("mouseout", function(e) {
+		var target = find_group(e.target);
+		if (target) details.nodeValue = ' ';
+	}, false)
+
+	// ctrl-F for search
+	window.addEventListener("keydown",function (e) {
+		if (e.keyCode === 114 || (e.ctrlKey && e.keyCode === 70)) {
+			e.preventDefault();
+			search_prompt();
+		}
+	}, false)
+
+	// functions
+	function find_child(node, selector) {
+		var children = node.querySelectorAll(selector);
+		if (children.length) return children[0];
+		return;
+	}
+	function find_group(node) {
+		var parent = node.parentElement;
+		if (!parent) return;
+		if (parent.id == "frames") return node;
+		return find_group(parent);
+	}
+	function orig_save(e, attr, val) {
+		if (e.attributes["_orig_" + attr] != undefined) return;
+		if (e.attributes[attr] == undefined) return;
+		if (val == undefined) val = e.attributes[attr].value;
+		e.setAttribute("_orig_" + attr, val);
+	}
+	function orig_load(e, attr) {
+		if (e.attributes["_orig_"+attr] == undefined) return;
+		e.attributes[attr].value = e.attributes["_orig_" + attr].value;
+		e.removeAttribute("_orig_"+attr);
+	}
+	function g_to_text(e) {
+		var text = find_child(e, "title").firstChild.nodeValue;
+		return (text)
+	}
+	function g_to_func(e) {
+		var func = g_to_text(e);
+		// if there's any manipulation we want to do to the function
+		// name before it's searched, do it here before returning.
+		return (func);
+	}
+	function update_text(e) {
+		var r = find_child(e, "rect");
+		var t = find_child(e, "text");
+		var w = parseFloat(r.attributes.width.value) -3;
+		var txt = find_child(e, "title").textContent.replace(/\([^(]*\)$/,"");
+		t.attributes.x.value = parseFloat(r.attributes.x.value) + 3;
+
+		// Smaller than this size won't fit anything
+		if (w < 2 * 12 * 0.59) {
+			t.textContent = "";
+			return;
+		}
+
+		t.textContent = txt;
+		// Fit in full text width
+		if (/^ *$/.test(txt) || t.getSubStringLength(0, txt.length) < w)
+			return;
+
+		for (var x = txt.length - 2; x > 0; x--) {
+			if (t.getSubStringLength(0, x + 2) <= w) {
+				t.textContent = txt.substring(0, x) + "..";
+				return;
+			}
+		}
+		t.textContent = "";
+	}
+
+	// zoom
+	function zoom_reset(e) {
+		if (e.attributes != undefined) {
+			orig_load(e, "x");
+			orig_load(e, "width");
+		}
+		if (e.childNodes == undefined) return;
+		for (var i = 0, c = e.childNodes; i < c.length; i++) {
+			zoom_reset(c[i]);
+		}
+	}
+	function zoom_child(e, x, ratio) {
+		if (e.attributes != undefined) {
+			if (e.attributes.x != undefined) {
+				orig_save(e, "x");
+				e.attributes.x.value = (parseFloat(e.attributes.x.value) - x - 10) * ratio + 10;
+				if (e.tagName == "text")
+					e.attributes.x.value = find_child(e.parentNode, "rect[x]").attributes.x.value + 3;
+			}
+			if (e.attributes.width != undefined) {
+				orig_save(e, "width");
+				e.attributes.width.value = parseFloat(e.attributes.width.value) * ratio;
+			}
+		}
+
+		if (e.childNodes == undefined) return;
+		for (var i = 0, c = e.childNodes; i < c.length; i++) {
+			zoom_child(c[i], x - 10, ratio);
+		}
+	}
+	function zoom_parent(e) {
+		if (e.attributes) {
+			if (e.attributes.x != undefined) {
+				orig_save(e, "x");
+				e.attributes.x.value = 10;
+			}
+			if (e.attributes.width != undefined) {
+				orig_save(e, "width");
+				e.attributes.width.value = parseInt(svg.width.baseVal.value) - (10 * 2);
+			}
+		}
+		if (e.childNodes == undefined) return;
+		for (var i = 0, c = e.childNodes; i < c.length; i++) {
+			zoom_parent(c[i]);
+		}
+	}
+	function zoom(node) {
+		var attr = find_child(node, "rect").attributes;
+		var width = parseFloat(attr.width.value);
+		var xmin = parseFloat(attr.x.value);
+		var xmax = parseFloat(xmin + width);
+		var ymin = parseFloat(attr.y.value);
+		var ratio = (svg.width.baseVal.value - 2 * 10) / width;
+
+		// XXX: Workaround for JavaScript float issues (fix me)
+		var fudge = 0.0001;
+
+		unzoombtn.classList.remove("hide");
+
+		var el = document.getElementById("frames").children;
+		for (var i = 0; i < el.length; i++) {
+			var e = el[i];
+			var a = find_child(e, "rect").attributes;
+			var ex = parseFloat(a.x.value);
+			var ew = parseFloat(a.width.value);
+			var upstack;
+			// Is it an ancestor
+			if (0 == 0) {
+				upstack = parseFloat(a.y.value) > ymin;
+			} else {
+				upstack = parseFloat(a.y.value) < ymin;
+			}
+			if (upstack) {
+				// Direct ancestor
+				if (ex <= xmin && (ex+ew+fudge) >= xmax) {
+					e.classList.add("parent");
+					zoom_parent(e);
+					update_text(e);
+				}
+				// not in current path
+				else
+					e.classList.add("hide");
+			}
+			// Children maybe
+			else {
+				// no common path
+				if (ex < xmin || ex + fudge >= xmax) {
+					e.classList.add("hide");
+				}
+				else {
+					zoom_child(e, xmin, ratio);
+					update_text(e);
+				}
+			}
+		}
+	}
+	function unzoom() {
+		unzoombtn.classList.add("hide");
+		var el = document.getElementById("frames").children;
+		for(var i = 0; i < el.length; i++) {
+			el[i].classList.remove("parent");
+			el[i].classList.remove("hide");
+			zoom_reset(el[i]);
+			update_text(el[i]);
+		}
+	}
+
+	// search
+	function reset_search() {
+		var el = document.querySelectorAll("#frames rect");
+		for (var i = 0; i < el.length; i++) {
+			orig_load(el[i], "fill")
+		}
+	}
+	function search_prompt() {
+		if (!searching) {
+			var term = prompt("Enter a search term (regexp " +
+			    "allowed, eg: ^ext4_)", "");
+			if (term != null) {
+				search(term)
+			}
+		} else {
+			reset_search();
+			searching = 0;
+			searchbtn.classList.remove("show");
+			searchbtn.firstChild.nodeValue = "Search"
+			matchedtxt.classList.add("hide");
+			matchedtxt.firstChild.nodeValue = ""
+		}
+	}
+	function search(term) {
+		var re = new RegExp(term);
+		var el = document.getElementById("frames").children;
+		var matches = new Object();
+		var maxwidth = 0;
+		for (var i = 0; i < el.length; i++) {
+			var e = el[i];
+			var func = g_to_func(e);
+			var rect = find_child(e, "rect");
+			if (func == null || rect == null)
+				continue;
+
+			// Save max width. Only works as we have a root frame
+			var w = parseFloat(rect.attributes.width.value);
+			if (w > maxwidth)
+				maxwidth = w;
+
+			if (func.match(re)) {
+				// highlight
+				var x = parseFloat(rect.attributes.x.value);
+				orig_save(rect, "fill");
+				rect.attributes.fill.value = "rgb(230,0,230)";
+
+				// remember matches
+				if (matches[x] == undefined) {
+					matches[x] = w;
+				} else {
+					if (w > matches[x]) {
+						// overwrite with parent
+						matches[x] = w;
+					}
+				}
+				searching = 1;
+			}
+		}
+		if (!searching)
+			return;
+
+		searchbtn.classList.add("show");
+		searchbtn.firstChild.nodeValue = "Reset Search";
+
+		// calculate percent matched, excluding vertical overlap
+		var count = 0;
+		var lastx = -1;
+		var lastw = 0;
+		var keys = Array();
+		for (k in matches) {
+			if (matches.hasOwnProperty(k))
+				keys.push(k);
+		}
+		// sort the matched frames by their x location
+		// ascending, then width descending
+		keys.sort(function(a, b){
+			return a - b;
+		});
+		// Step through frames saving only the biggest bottom-up frames
+		// thanks to the sort order. This relies on the tree property
+		// where children are always smaller than their parents.
+		var fudge = 0.0001;	// JavaScript floating point
+		for (var k in keys) {
+			var x = parseFloat(keys[k]);
+			var w = matches[keys[k]];
+			if (x >= lastx + lastw - fudge) {
+				count += w;
+				lastx = x;
+				lastw = w;
+			}
+		}
+		// display matched percent
+		matchedtxt.classList.remove("hide");
+		var pct = 100 * count / maxwidth;
+		if (pct != 100) pct = pct.toFixed(1)
+		matchedtxt.firstChild.nodeValue = "Matched: " + pct + "%";
+	}
+]]>
+</script>
+<rect x="0.0" y="0" width="2000.0" height="990.0" fill="url(#background)"  />
+<text id="title" x="1000.00" y="24" >Flame Graph</text>
+<text id="details" x="10.00" y="973" > </text>
+<text id="unzoom" x="10.00" y="24" class="hide">Reset Zoom</text>
+<text id="search" x="1890.00" y="24" >Search</text>
+<text id="matched" x="1890.00" y="973" > </text>
+<g id="frames">
+<g >
+<title>ftrace_graph_caller (1 samples, 0.25%)</title><rect x="99.1" y="717" width="4.9" height="19.0" fill="rgb(245,213,23)" rx="2" ry="2" />
+<text  x="102.10" y="729.5" ></text>
+</g>
+<g >
+<title>prepare_ftrace_return (1 samples, 0.25%)</title><rect x="94.2" y="697" width="4.9" height="19.0" fill="rgb(226,114,3)" rx="2" ry="2" />
+<text  x="97.15" y="709.5" ></text>
+</g>
+<g >
+<title>vfs_read (198 samples, 49.50%)</title><rect x="114.0" y="737" width="980.0" height="19.0" fill="rgb(250,131,7)" rx="2" ry="2" />
+<text  x="116.95" y="749.5" >vfs_read</text>
+</g>
+<g >
+<title>prepare_ftrace_return (1 samples, 0.25%)</title><rect x="114.0" y="657" width="4.9" height="19.0" fill="rgb(244,153,29)" rx="2" ry="2" />
+<text  x="116.95" y="669.5" ></text>
+</g>
+<g >
+<title>function_graph_enter (9 samples, 2.25%)</title><rect x="920.8" y="597" width="44.6" height="19.0" fill="rgb(216,228,38)" rx="2" ry="2" />
+<text  x="923.80" y="609.5" >func..</text>
+</g>
+<g >
+<title>blk_mq_complete_request (1 samples, 0.25%)</title><rect x="39.7" y="197" width="4.9" height="19.0" fill="rgb(220,214,8)" rx="2" ry="2" />
+<text  x="42.70" y="209.5" ></text>
+</g>
+<g >
+<title>function_graph_enter (6 samples, 1.50%)</title><rect x="584.2" y="577" width="29.7" height="19.0" fill="rgb(239,186,47)" rx="2" ry="2" />
+<text  x="587.20" y="589.5" >fu..</text>
+</g>
+<g >
+<title>function_graph_enter (1 samples, 0.25%)</title><rect x="1599.0" y="417" width="4.9" height="19.0" fill="rgb(252,187,21)" rx="2" ry="2" />
+<text  x="1601.95" y="429.5" ></text>
+</g>
+<g >
+<title>fsnotify (2 samples, 0.50%)</title><rect x="1039.6" y="717" width="9.9" height="19.0" fill="rgb(229,198,37)" rx="2" ry="2" />
+<text  x="1042.60" y="729.5" ></text>
+</g>
+<g >
+<title>function_graph_enter (2 samples, 0.50%)</title><rect x="1529.7" y="417" width="9.8" height="19.0" fill="rgb(229,73,8)" rx="2" ry="2" />
+<text  x="1532.65" y="429.5" ></text>
+</g>
+<g >
+<title>prepare_ftrace_return (1 samples, 0.25%)</title><rect x="138.7" y="677" width="5.0" height="19.0" fill="rgb(249,8,45)" rx="2" ry="2" />
+<text  x="141.70" y="689.5" ></text>
+</g>
+<g >
+<title>ret_from_intr (1 samples, 0.25%)</title><rect x="39.7" y="377" width="4.9" height="19.0" fill="rgb(221,55,45)" rx="2" ry="2" />
+<text  x="42.70" y="389.5" ></text>
+</g>
+<g >
+<title>ftrace_lookup_ip (1 samples, 0.25%)</title><rect x="1658.4" y="357" width="4.9" height="19.0" fill="rgb(231,5,0)" rx="2" ry="2" />
+<text  x="1661.35" y="369.5" ></text>
+</g>
+<g >
+<title>common_file_perm (2 samples, 0.50%)</title><rect x="1079.2" y="657" width="9.9" height="19.0" fill="rgb(239,17,37)" rx="2" ry="2" />
+<text  x="1082.20" y="669.5" ></text>
+</g>
+<g >
+<title>ftrace_graph_caller (1 samples, 0.25%)</title><rect x="1341.5" y="557" width="5.0" height="19.0" fill="rgb(208,202,38)" rx="2" ry="2" />
+<text  x="1344.55" y="569.5" ></text>
+</g>
+<g >
+<title>_cond_resched (1 samples, 0.25%)</title><rect x="1247.5" y="557" width="5.0" height="19.0" fill="rgb(223,133,26)" rx="2" ry="2" />
+<text  x="1250.50" y="569.5" ></text>
+</g>
+<g >
+<title>ftrace_lookup_ip (1 samples, 0.25%)</title><rect x="1178.2" y="497" width="5.0" height="19.0" fill="rgb(247,180,14)" rx="2" ry="2" />
+<text  x="1181.20" y="509.5" ></text>
+</g>
+<g >
+<title>vfs_statx_fd (1 samples, 0.25%)</title><rect x="1960.3" y="757" width="4.9" height="19.0" fill="rgb(240,112,49)" rx="2" ry="2" />
+<text  x="1963.30" y="769.5" ></text>
+</g>
+<g >
+<title>mem_cgroup_commit_charge (1 samples, 0.25%)</title><rect x="1425.7" y="517" width="5.0" height="19.0" fill="rgb(237,8,39)" rx="2" ry="2" />
+<text  x="1428.70" y="529.5" ></text>
+</g>
+<g >
+<title>trace_clock_local (1 samples, 0.25%)</title><rect x="1945.5" y="597" width="4.9" height="19.0" fill="rgb(252,93,12)" rx="2" ry="2" />
+<text  x="1948.45" y="609.5" ></text>
+</g>
+<g >
+<title>ext4_block_write_begin (7 samples, 1.75%)</title><rect x="1346.5" y="597" width="34.7" height="19.0" fill="rgb(251,106,23)" rx="2" ry="2" />
+<text  x="1349.50" y="609.5" >ex..</text>
+</g>
+<g >
+<title>ftrace_graph_is_dead (1 samples, 0.25%)</title><rect x="1777.2" y="417" width="4.9" height="19.0" fill="rgb(232,166,4)" rx="2" ry="2" />
+<text  x="1780.15" y="429.5" ></text>
+</g>
+<g >
+<title>find_get_entry (1 samples, 0.25%)</title><rect x="1435.6" y="557" width="4.9" height="19.0" fill="rgb(229,32,25)" rx="2" ry="2" />
+<text  x="1438.60" y="569.5" ></text>
+</g>
+<g >
+<title>prepare_ftrace_return (2 samples, 0.50%)</title><rect x="1173.2" y="557" width="10.0" height="19.0" fill="rgb(243,24,35)" rx="2" ry="2" />
+<text  x="1176.25" y="569.5" ></text>
+</g>
+<g >
+<title>ftrace_lookup_ip (1 samples, 0.25%)</title><rect x="648.6" y="557" width="4.9" height="19.0" fill="rgb(226,161,26)" rx="2" ry="2" />
+<text  x="651.55" y="569.5" ></text>
+</g>
+<g >
+<title>prepare_ftrace_return (2 samples, 0.50%)</title><rect x="34.8" y="417" width="9.8" height="19.0" fill="rgb(220,95,9)" rx="2" ry="2" />
+<text  x="37.75" y="429.5" ></text>
+</g>
+<g >
+<title>function_graph_enter (1 samples, 0.25%)</title><rect x="1683.1" y="417" width="4.9" height="19.0" fill="rgb(247,54,48)" rx="2" ry="2" />
+<text  x="1686.10" y="429.5" ></text>
+</g>
+<g >
+<title>ext4_setattr (1 samples, 0.25%)</title><rect x="49.6" y="617" width="5.0" height="19.0" fill="rgb(239,159,32)" rx="2" ry="2" />
+<text  x="52.60" y="629.5" ></text>
+</g>
+<g >
+<title>ftrace_graph_caller (1 samples, 0.25%)</title><rect x="1143.5" y="697" width="5.0" height="19.0" fill="rgb(246,118,2)" rx="2" ry="2" />
+<text  x="1146.55" y="709.5" ></text>
+</g>
+<g >
+<title>dput (2 samples, 0.50%)</title><rect x="1069.3" y="657" width="9.9" height="19.0" fill="rgb(244,16,33)" rx="2" ry="2" />
+<text  x="1072.30" y="669.5" ></text>
+</g>
+<g >
+<title>rw_verify_area (8 samples, 2.00%)</title><rect x="1054.5" y="717" width="39.5" height="19.0" fill="rgb(216,111,37)" rx="2" ry="2" />
+<text  x="1057.45" y="729.5" >rw_..</text>
+</g>
+<g >
+<title>_raw_spin_unlock_irqrestore (2 samples, 0.50%)</title><rect x="277.3" y="637" width="9.9" height="19.0" fill="rgb(237,31,10)" rx="2" ry="2" />
+<text  x="280.30" y="649.5" ></text>
+</g>
+<g >
+<title>prepare_ftrace_return (1 samples, 0.25%)</title><rect x="1881.1" y="617" width="4.9" height="19.0" fill="rgb(240,16,0)" rx="2" ry="2" />
+<text  x="1884.10" y="629.5" ></text>
+</g>
+<g >
+<title>__fput (8 samples, 2.00%)</title><rect x="10.0" y="677" width="39.6" height="19.0" fill="rgb(229,160,1)" rx="2" ry="2" />
+<text  x="13.00" y="689.5" >__f..</text>
+</g>
+<g >
+<title>trace_graph_entry (1 samples, 0.25%)</title><rect x="1128.7" y="677" width="5.0" height="19.0" fill="rgb(214,63,11)" rx="2" ry="2" />
+<text  x="1131.70" y="689.5" ></text>
+</g>
+<g >
+<title>trace_graph_entry (1 samples, 0.25%)</title><rect x="1519.8" y="537" width="4.9" height="19.0" fill="rgb(254,216,2)" rx="2" ry="2" />
+<text  x="1522.75" y="549.5" ></text>
+</g>
+<g >
+<title>ftrace_graph_caller (1 samples, 0.25%)</title><rect x="1262.4" y="557" width="4.9" height="19.0" fill="rgb(244,201,6)" rx="2" ry="2" />
+<text  x="1265.35" y="569.5" ></text>
+</g>
+<g >
+<title>function_graph_enter (1 samples, 0.25%)</title><rect x="1707.9" y="397" width="4.9" height="19.0" fill="rgb(243,13,0)" rx="2" ry="2" />
+<text  x="1710.85" y="409.5" ></text>
+</g>
+<g >
+<title>function_graph_enter (1 samples, 0.25%)</title><rect x="1460.4" y="537" width="4.9" height="19.0" fill="rgb(246,27,22)" rx="2" ry="2" />
+<text  x="1463.35" y="549.5" ></text>
+</g>
+<g >
+<title>trace_graph_entry (2 samples, 0.50%)</title><rect x="1173.2" y="517" width="10.0" height="19.0" fill="rgb(225,190,36)" rx="2" ry="2" />
+<text  x="1176.25" y="529.5" ></text>
+</g>
+<g >
+<title>function_graph_enter (1 samples, 0.25%)</title><rect x="1772.2" y="417" width="5.0" height="19.0" fill="rgb(241,2,35)" rx="2" ry="2" />
+<text  x="1775.20" y="429.5" ></text>
+</g>
+<g >
+<title>ext4_da_get_block_prep (4 samples, 1.00%)</title><rect x="1361.4" y="577" width="19.8" height="19.0" fill="rgb(224,39,14)" rx="2" ry="2" />
+<text  x="1364.35" y="589.5" ></text>
+</g>
+<g >
+<title>nvme_pci_complete_rq (1 samples, 0.25%)</title><rect x="39.7" y="157" width="4.9" height="19.0" fill="rgb(207,200,23)" rx="2" ry="2" />
+<text  x="42.70" y="169.5" ></text>
+</g>
+<g >
+<title>ftrace_lookup_ip (1 samples, 0.25%)</title><rect x="1673.2" y="337" width="5.0" height="19.0" fill="rgb(223,219,2)" rx="2" ry="2" />
+<text  x="1676.20" y="349.5" ></text>
+</g>
+<g >
+<title>trace_graph_entry (1 samples, 0.25%)</title><rect x="1806.9" y="477" width="4.9" height="19.0" fill="rgb(235,184,51)" rx="2" ry="2" />
+<text  x="1809.85" y="489.5" ></text>
+</g>
+<g >
+<title>_cond_resched (1 samples, 0.25%)</title><rect x="1257.4" y="557" width="5.0" height="19.0" fill="rgb(221,192,3)" rx="2" ry="2" />
+<text  x="1260.40" y="569.5" ></text>
+</g>
+<g >
+<title>trace_graph_entry (1 samples, 0.25%)</title><rect x="1425.7" y="457" width="5.0" height="19.0" fill="rgb(225,127,4)" rx="2" ry="2" />
+<text  x="1428.70" y="469.5" ></text>
+</g>
+<g >
+<title>ftrace_lookup_ip (1 samples, 0.25%)</title><rect x="1143.5" y="617" width="5.0" height="19.0" fill="rgb(206,110,42)" rx="2" ry="2" />
+<text  x="1146.55" y="629.5" ></text>
+</g>
+<g >
+<title>ftrace_graph_caller (1 samples, 0.25%)</title><rect x="1247.5" y="517" width="5.0" height="19.0" fill="rgb(246,156,8)" rx="2" ry="2" />
+<text  x="1250.50" y="529.5" ></text>
+</g>
+<g >
+<title>ftrace_graph_caller (4 samples, 1.00%)</title><rect x="1524.7" y="457" width="19.8" height="19.0" fill="rgb(228,225,23)" rx="2" ry="2" />
+<text  x="1527.70" y="469.5" ></text>
+</g>
+<g >
+<title>function_graph_enter (1 samples, 0.25%)</title><rect x="1420.8" y="477" width="4.9" height="19.0" fill="rgb(215,41,44)" rx="2" ry="2" />
+<text  x="1423.75" y="489.5" ></text>
+</g>
+<g >
+<title>crc32c_pcl_intel_update (4 samples, 1.00%)</title><rect x="1623.7" y="417" width="19.8" height="19.0" fill="rgb(219,159,4)" rx="2" ry="2" />
+<text  x="1626.70" y="429.5" ></text>
+</g>
+<g >
+<title>prepare_ftrace_return (2 samples, 0.50%)</title><rect x="277.3" y="597" width="9.9" height="19.0" fill="rgb(243,214,9)" rx="2" ry="2" />
+<text  x="280.30" y="609.5" ></text>
+</g>
+<g >
+<title>rcu_all_qs (4 samples, 1.00%)</title><rect x="1524.7" y="477" width="19.8" height="19.0" fill="rgb(227,63,46)" rx="2" ry="2" />
+<text  x="1527.70" y="489.5" ></text>
+</g>
+<g >
+<title>native_sched_clock (1 samples, 0.25%)</title><rect x="1123.8" y="617" width="4.9" height="19.0" fill="rgb(237,167,19)" rx="2" ry="2" />
+<text  x="1126.75" y="629.5" ></text>
+</g>
+<g >
+<title>prepare_ftrace_return (2 samples, 0.50%)</title><rect x="1306.9" y="497" width="9.9" height="19.0" fill="rgb(214,127,18)" rx="2" ry="2" />
+<text  x="1309.90" y="509.5" ></text>
+</g>
+<g >
+<title>trace_graph_entry (1 samples, 0.25%)</title><rect x="138.7" y="657" width="5.0" height="19.0" fill="rgb(209,117,28)" rx="2" ry="2" />
+<text  x="141.70" y="669.5" ></text>
+</g>
+<g >
+<title>ext4_inode_csum.isra.57 (14 samples, 3.50%)</title><rect x="1608.9" y="457" width="69.3" height="19.0" fill="rgb(208,95,26)" rx="2" ry="2" />
+<text  x="1611.85" y="469.5" >ext4_in..</text>
+</g>
+<g >
+<title>block_write_end (7 samples, 1.75%)</title><rect x="1821.7" y="577" width="34.7" height="19.0" fill="rgb(227,139,44)" rx="2" ry="2" />
+<text  x="1824.70" y="589.5" >bl..</text>
+</g>
+<g >
+<title>trace_clock_local (1 samples, 0.25%)</title><rect x="1168.3" y="537" width="4.9" height="19.0" fill="rgb(241,120,11)" rx="2" ry="2" />
+<text  x="1171.30" y="549.5" ></text>
+</g>
+<g >
+<title>do_sys_open (1 samples, 0.25%)</title><rect x="49.6" y="717" width="5.0" height="19.0" fill="rgb(221,111,49)" rx="2" ry="2" />
+<text  x="52.60" y="729.5" ></text>
+</g>
+<g >
+<title>function_graph_enter (2 samples, 0.50%)</title><rect x="1039.6" y="657" width="9.9" height="19.0" fill="rgb(237,49,33)" rx="2" ry="2" />
+<text  x="1042.60" y="669.5" ></text>
+</g>
+<g >
+<title>prepare_ftrace_return (1 samples, 0.25%)</title><rect x="1262.4" y="537" width="4.9" height="19.0" fill="rgb(249,221,14)" rx="2" ry="2" />
+<text  x="1265.35" y="549.5" ></text>
+</g>
+<g >
+<title>ftrace_graph_caller (1 samples, 0.25%)</title><rect x="1841.5" y="477" width="5.0" height="19.0" fill="rgb(238,24,17)" rx="2" ry="2" />
+<text  x="1844.50" y="489.5" ></text>
+</g>
+<g >
+<title>ext4_file_write_iter (152 samples, 38.00%)</title><rect x="1148.5" y="677" width="752.4" height="19.0" fill="rgb(246,147,19)" rx="2" ry="2" />
+<text  x="1151.50" y="689.5" >ext4_file_write_iter</text>
+</g>
+<g >
+<title>prepare_ftrace_return (2 samples, 0.50%)</title><rect x="1702.9" y="417" width="9.9" height="19.0" fill="rgb(206,73,14)" rx="2" ry="2" />
+<text  x="1705.90" y="429.5" ></text>
+</g>
+<g >
+<title>ftrace_lookup_ip (1 samples, 0.25%)</title><rect x="1603.9" y="357" width="5.0" height="19.0" fill="rgb(249,165,34)" rx="2" ry="2" />
+<text  x="1606.90" y="369.5" ></text>
+</g>
+<g >
+<title>sys_execve (5 samples, 1.25%)</title><rect x="1965.2" y="857" width="24.8" height="19.0" fill="rgb(246,27,46)" rx="2" ry="2" />
+<text  x="1968.25" y="869.5" >s..</text>
+</g>
+<g >
+<title>ftrace_graph_caller (2 samples, 0.50%)</title><rect x="1069.3" y="617" width="9.9" height="19.0" fill="rgb(215,149,36)" rx="2" ry="2" />
+<text  x="1072.30" y="629.5" ></text>
+</g>
+<g >
+<title>function_graph_enter (1 samples, 0.25%)</title><rect x="1896.0" y="597" width="4.9" height="19.0" fill="rgb(216,183,36)" rx="2" ry="2" />
+<text  x="1898.95" y="609.5" ></text>
+</g>
+<g >
+<title>ftrace_lookup_ip (1 samples, 0.25%)</title><rect x="1490.0" y="417" width="5.0" height="19.0" fill="rgb(227,92,4)" rx="2" ry="2" />
+<text  x="1493.05" y="429.5" ></text>
+</g>
+<g >
+<title>ftrace_graph_caller (2 samples, 0.50%)</title><rect x="1589.0" y="417" width="10.0" height="19.0" fill="rgb(236,16,39)" rx="2" ry="2" />
+<text  x="1592.05" y="429.5" ></text>
+</g>
+<g >
+<title>from_kgid (3 samples, 0.75%)</title><rect x="1683.1" y="477" width="14.9" height="19.0" fill="rgb(230,26,37)" rx="2" ry="2" />
+<text  x="1686.10" y="489.5" ></text>
+</g>
+<g >
+<title>sched_clock (1 samples, 0.25%)</title><rect x="935.6" y="557" width="5.0" height="19.0" fill="rgb(208,140,47)" rx="2" ry="2" />
+<text  x="938.65" y="569.5" ></text>
+</g>
+<g >
+<title>native_sched_clock (1 samples, 0.25%)</title><rect x="653.5" y="537" width="5.0" height="19.0" fill="rgb(248,173,19)" rx="2" ry="2" />
+<text  x="656.50" y="549.5" ></text>
+</g>
+<g >
+<title>__mod_node_page_state (1 samples, 0.25%)</title><rect x="1836.5" y="477" width="5.0" height="19.0" fill="rgb(248,176,32)" rx="2" ry="2" />
+<text  x="1839.55" y="489.5" ></text>
+</g>
+<g >
+<title>trace_graph_entry (1 samples, 0.25%)</title><rect x="1188.1" y="557" width="4.9" height="19.0" fill="rgb(249,11,21)" rx="2" ry="2" />
+<text  x="1191.10" y="569.5" ></text>
+</g>
+<g >
+<title>_cond_resched (2 samples, 0.50%)</title><rect x="1336.6" y="597" width="9.9" height="19.0" fill="rgb(219,52,27)" rx="2" ry="2" />
+<text  x="1339.60" y="609.5" ></text>
+</g>
+<g >
+<title>map_id_up (2 samples, 0.50%)</title><rect x="1712.8" y="457" width="9.9" height="19.0" fill="rgb(211,138,4)" rx="2" ry="2" />
+<text  x="1715.80" y="469.5" ></text>
+</g>
+<g >
+<title>radix_tree_next_chunk (1 samples, 0.25%)</title><rect x="1346.5" y="517" width="5.0" height="19.0" fill="rgb(235,160,25)" rx="2" ry="2" />
+<text  x="1349.50" y="529.5" ></text>
+</g>
+<g >
+<title>alloc_page_buffers (2 samples, 0.50%)</title><rect x="1351.5" y="557" width="9.9" height="19.0" fill="rgb(237,104,30)" rx="2" ry="2" />
+<text  x="1354.45" y="569.5" ></text>
+</g>
+<g >
+<title>entry_SYSCALL_64_after_hwframe (209 samples, 52.25%)</title><rect x="59.5" y="797" width="1034.5" height="19.0" fill="rgb(206,183,32)" rx="2" ry="2" />
+<text  x="62.50" y="809.5" >entry_SYSCALL_64_after_hwframe</text>
+</g>
+<g >
+<title>function_graph_enter (1 samples, 0.25%)</title><rect x="49.6" y="477" width="5.0" height="19.0" fill="rgb(248,101,50)" rx="2" ry="2" />
+<text  x="52.60" y="489.5" ></text>
+</g>
+<g >
+<title>trace_graph_entry (1 samples, 0.25%)</title><rect x="1534.6" y="397" width="4.9" height="19.0" fill="rgb(206,107,6)" rx="2" ry="2" />
+<text  x="1537.60" y="409.5" ></text>
+</g>
+<g >
+<title>prepare_ftrace_return (1 samples, 0.25%)</title><rect x="1168.3" y="577" width="4.9" height="19.0" fill="rgb(226,206,41)" rx="2" ry="2" />
+<text  x="1171.30" y="589.5" ></text>
+</g>
+<g >
+<title>pagevec_lookup_range (1 samples, 0.25%)</title><rect x="1346.5" y="557" width="5.0" height="19.0" fill="rgb(216,64,0)" rx="2" ry="2" />
+<text  x="1349.50" y="569.5" ></text>
+</g>
+<g >
+<title>ftrace_graph_caller (1 samples, 0.25%)</title><rect x="1722.7" y="477" width="5.0" height="19.0" fill="rgb(247,193,50)" rx="2" ry="2" />
+<text  x="1725.70" y="489.5" ></text>
+</g>
+<g >
+<title>__ext4_journal_start_sb (18 samples, 4.50%)</title><rect x="1247.5" y="597" width="89.1" height="19.0" fill="rgb(238,136,40)" rx="2" ry="2" />
+<text  x="1250.50" y="609.5" >__ext4_jou..</text>
+</g>
+<g >
+<title>function_graph_enter (1 samples, 0.25%)</title><rect x="1965.2" y="657" width="5.0" height="19.0" fill="rgb(252,188,16)" rx="2" ry="2" />
+<text  x="1968.25" y="669.5" ></text>
+</g>
+<g >
+<title>ftrace_graph_caller (4 samples, 1.00%)</title><rect x="1212.9" y="597" width="19.8" height="19.0" fill="rgb(245,32,7)" rx="2" ry="2" />
+<text  x="1215.85" y="609.5" ></text>
+</g>
+<g >
+<title>function_graph_enter (1 samples, 0.25%)</title><rect x="1212.9" y="577" width="4.9" height="19.0" fill="rgb(245,189,51)" rx="2" ry="2" />
+<text  x="1215.85" y="589.5" ></text>
+</g>
+<g >
+<title>function_graph_enter (2 samples, 0.50%)</title><rect x="1069.3" y="577" width="9.9" height="19.0" fill="rgb(233,40,26)" rx="2" ry="2" />
+<text  x="1072.30" y="589.5" ></text>
+</g>
+<g >
+<title>trace_graph_entry (1 samples, 0.25%)</title><rect x="1321.8" y="457" width="4.9" height="19.0" fill="rgb(237,181,11)" rx="2" ry="2" />
+<text  x="1324.75" y="469.5" ></text>
+</g>
+<g >
+<title>ext4_es_insert_extent (2 samples, 0.50%)</title><rect x="1361.4" y="557" width="9.8" height="19.0" fill="rgb(238,186,31)" rx="2" ry="2" />
+<text  x="1364.35" y="569.5" ></text>
+</g>
+<g >
+<title>function_graph_enter (1 samples, 0.25%)</title><rect x="1806.9" y="497" width="4.9" height="19.0" fill="rgb(230,138,8)" rx="2" ry="2" />
+<text  x="1809.85" y="509.5" ></text>
+</g>
+<g >
+<title>prepare_ftrace_return (1 samples, 0.25%)</title><rect x="1717.8" y="417" width="4.9" height="19.0" fill="rgb(229,80,27)" rx="2" ry="2" />
+<text  x="1720.75" y="429.5" ></text>
+</g>
+<g >
+<title>ftrace_graph_caller (1 samples, 0.25%)</title><rect x="24.9" y="457" width="4.9" height="19.0" fill="rgb(248,133,24)" rx="2" ry="2" />
+<text  x="27.85" y="469.5" ></text>
+</g>
+<g >
+<title>function_graph_enter (1 samples, 0.25%)</title><rect x="1945.5" y="617" width="4.9" height="19.0" fill="rgb(237,187,27)" rx="2" ry="2" />
+<text  x="1948.45" y="629.5" ></text>
+</g>
+<g >
+<title>ext4_inode_csum_set (15 samples, 3.75%)</title><rect x="1608.9" y="477" width="74.2" height="19.0" fill="rgb(232,208,17)" rx="2" ry="2" />
+<text  x="1611.85" y="489.5" >ext4_ino..</text>
+</g>
+<g >
+<title>ftrace_graph_caller (2 samples, 0.50%)</title><rect x="1405.9" y="517" width="9.9" height="19.0" fill="rgb(222,207,10)" rx="2" ry="2" />
+<text  x="1408.90" y="529.5" ></text>
+</g>
+<g >
+<title>__GI___close (8 samples, 2.00%)</title><rect x="10.0" y="797" width="39.6" height="19.0" fill="rgb(243,99,1)" rx="2" ry="2" />
+<text  x="13.00" y="809.5" >__G..</text>
+</g>
+<g >
+<title>rcu_all_qs (1 samples, 0.25%)</title><rect x="1277.2" y="517" width="5.0" height="19.0" fill="rgb(213,208,6)" rx="2" ry="2" />
+<text  x="1280.20" y="529.5" ></text>
+</g>
+<g >
+<title>trace_graph_entry (1 samples, 0.25%)</title><rect x="109.0" y="697" width="5.0" height="19.0" fill="rgb(214,147,48)" rx="2" ry="2" />
+<text  x="112.00" y="709.5" ></text>
+</g>
+<g >
+<title>ftrace_graph_caller (2 samples, 0.50%)</title><rect x="1173.2" y="577" width="10.0" height="19.0" fill="rgb(223,119,30)" rx="2" ry="2" />
+<text  x="1176.25" y="589.5" ></text>
+</g>
+<g >
+<title>__check_object_size (20 samples, 5.00%)</title><rect x="148.6" y="677" width="99.0" height="19.0" fill="rgb(238,225,3)" rx="2" ry="2" />
+<text  x="151.60" y="689.5" >__check_obj..</text>
+</g>
+<g >
+<title>ftrace_graph_caller (1 samples, 0.25%)</title><rect x="44.6" y="477" width="5.0" height="19.0" fill="rgb(221,72,20)" rx="2" ry="2" />
+<text  x="47.65" y="489.5" ></text>
+</g>
+<g >
+<title>kmem_cache_alloc (5 samples, 1.25%)</title><rect x="1267.3" y="557" width="24.7" height="19.0" fill="rgb(251,153,53)" rx="2" ry="2" />
+<text  x="1270.30" y="569.5" >k..</text>
+</g>
+<g >
+<title>native_sched_clock (1 samples, 0.25%)</title><rect x="1544.5" y="397" width="5.0" height="19.0" fill="rgb(243,190,53)" rx="2" ry="2" />
+<text  x="1547.50" y="409.5" ></text>
+</g>
+<g >
+<title>current_time (4 samples, 1.00%)</title><rect x="1163.4" y="617" width="19.8" height="19.0" fill="rgb(222,66,34)" rx="2" ry="2" />
+<text  x="1166.35" y="629.5" ></text>
+</g>
+<g >
+<title>ftrace_graph_caller (1 samples, 0.25%)</title><rect x="114.0" y="677" width="4.9" height="19.0" fill="rgb(225,80,9)" rx="2" ry="2" />
+<text  x="116.95" y="689.5" ></text>
+</g>
+<g >
+<title>prepare_ftrace_return (1 samples, 0.25%)</title><rect x="1287.1" y="497" width="4.9" height="19.0" fill="rgb(241,171,3)" rx="2" ry="2" />
+<text  x="1290.10" y="509.5" ></text>
+</g>
+<g >
+<title>policy_node (1 samples, 0.25%)</title><rect x="1401.0" y="517" width="4.9" height="19.0" fill="rgb(223,226,26)" rx="2" ry="2" />
+<text  x="1403.95" y="529.5" ></text>
+</g>
+<g >
+<title>function_graph_enter (1 samples, 0.25%)</title><rect x="1207.9" y="597" width="5.0" height="19.0" fill="rgb(254,188,8)" rx="2" ry="2" />
+<text  x="1210.90" y="609.5" ></text>
+</g>
+<g >
+<title>prepare_ftrace_return (2 samples, 0.50%)</title><rect x="1153.5" y="597" width="9.9" height="19.0" fill="rgb(225,34,15)" rx="2" ry="2" />
+<text  x="1156.45" y="609.5" ></text>
+</g>
+<g >
+<title>function_graph_enter (1 samples, 0.25%)</title><rect x="114.0" y="637" width="4.9" height="19.0" fill="rgb(205,73,36)" rx="2" ry="2" />
+<text  x="116.95" y="649.5" ></text>
+</g>
+<g >
+<title>prepare_ftrace_return (9 samples, 2.25%)</title><rect x="638.6" y="597" width="44.6" height="19.0" fill="rgb(209,201,51)" rx="2" ry="2" />
+<text  x="641.65" y="609.5" >prep..</text>
+</g>
+<g >
+<title>fsnotify (1 samples, 0.25%)</title><rect x="1900.9" y="717" width="5.0" height="19.0" fill="rgb(223,198,13)" rx="2" ry="2" />
+<text  x="1903.90" y="729.5" ></text>
+</g>
+<g >
+<title>trace_clock_local (1 samples, 0.25%)</title><rect x="104.0" y="677" width="5.0" height="19.0" fill="rgb(224,141,13)" rx="2" ry="2" />
+<text  x="107.05" y="689.5" ></text>
+</g>
+<g >
+<title>sched_clock (2 samples, 0.50%)</title><rect x="1663.3" y="337" width="9.9" height="19.0" fill="rgb(207,63,9)" rx="2" ry="2" />
+<text  x="1666.30" y="349.5" ></text>
+</g>
+<g >
+<title>function_graph_enter (1 samples, 0.25%)</title><rect x="1113.9" y="657" width="4.9" height="19.0" fill="rgb(254,40,8)" rx="2" ry="2" />
+<text  x="1116.85" y="669.5" ></text>
+</g>
+<g >
+<title>alloc_pages_current (4 samples, 1.00%)</title><rect x="1386.1" y="537" width="19.8" height="19.0" fill="rgb(234,54,26)" rx="2" ry="2" />
+<text  x="1389.10" y="549.5" ></text>
+</g>
+<g >
+<title>page_mkclean (1 samples, 0.25%)</title><rect x="24.9" y="477" width="4.9" height="19.0" fill="rgb(240,14,6)" rx="2" ry="2" />
+<text  x="27.85" y="489.5" ></text>
+</g>
+<g >
+<title>ext4_dirty_inode (58 samples, 14.50%)</title><rect x="1524.7" y="557" width="287.1" height="19.0" fill="rgb(229,39,35)" rx="2" ry="2" />
+<text  x="1527.70" y="569.5" >ext4_dirty_inode</text>
+</g>
+<g >
+<title>ftrace_graph_caller (1 samples, 0.25%)</title><rect x="1519.8" y="597" width="4.9" height="19.0" fill="rgb(212,40,0)" rx="2" ry="2" />
+<text  x="1522.75" y="609.5" ></text>
+</g>
+<g >
+<title>prepare_ftrace_return (2 samples, 0.50%)</title><rect x="1069.3" y="597" width="9.9" height="19.0" fill="rgb(214,135,45)" rx="2" ry="2" />
+<text  x="1072.30" y="609.5" ></text>
+</g>
+<g >
+<title>__fdget_pos (3 samples, 0.75%)</title><rect x="1113.9" y="737" width="14.8" height="19.0" fill="rgb(208,205,0)" rx="2" ry="2" />
+<text  x="1116.85" y="749.5" ></text>
+</g>
+<g >
+<title>aa_file_perm (1 samples, 0.25%)</title><rect x="1079.2" y="637" width="5.0" height="19.0" fill="rgb(211,49,48)" rx="2" ry="2" />
+<text  x="1082.20" y="649.5" ></text>
+</g>
+<g >
+<title>__libc_start_main (394 samples, 98.50%)</title><rect x="10.0" y="877" width="1950.3" height="19.0" fill="rgb(249,139,53)" rx="2" ry="2" />
+<text  x="13.00" y="889.5" >__libc_start_main</text>
+</g>
+<g >
+<title>ftrace_graph_caller (7 samples, 1.75%)</title><rect x="1643.5" y="417" width="34.7" height="19.0" fill="rgb(231,98,30)" rx="2" ry="2" />
+<text  x="1646.50" y="429.5" >ft..</text>
+</g>
+<g >
+<title>urandom_read (180 samples, 45.00%)</title><rect x="143.7" y="697" width="891.0" height="19.0" fill="rgb(249,224,21)" rx="2" ry="2" />
+<text  x="146.65" y="709.5" >urandom_read</text>
+</g>
+<g >
+<title>dec_zone_page_state (1 samples, 0.25%)</title><rect x="10.0" y="477" width="4.9" height="19.0" fill="rgb(217,178,43)" rx="2" ry="2" />
+<text  x="13.00" y="489.5" ></text>
+</g>
+<g >
+<title>native_sched_clock (2 samples, 0.50%)</title><rect x="1663.3" y="317" width="9.9" height="19.0" fill="rgb(233,198,53)" rx="2" ry="2" />
+<text  x="1666.30" y="329.5" ></text>
+</g>
+<g >
+<title>ftrace_graph_caller (2 samples, 0.50%)</title><rect x="277.3" y="617" width="9.9" height="19.0" fill="rgb(243,81,26)" rx="2" ry="2" />
+<text  x="280.30" y="629.5" ></text>
+</g>
+<g >
+<title>jbd2__journal_start (16 samples, 4.00%)</title><rect x="1257.4" y="577" width="79.2" height="19.0" fill="rgb(231,77,1)" rx="2" ry="2" />
+<text  x="1260.40" y="589.5" >jbd2__jou..</text>
+</g>
+<g >
+<title>trace_graph_entry (1 samples, 0.25%)</title><rect x="1594.0" y="357" width="5.0" height="19.0" fill="rgb(254,53,42)" rx="2" ry="2" />
+<text  x="1597.00" y="369.5" ></text>
+</g>
+<g >
+<title>native_sched_clock (1 samples, 0.25%)</title><rect x="1376.2" y="437" width="5.0" height="19.0" fill="rgb(247,64,35)" rx="2" ry="2" />
+<text  x="1379.20" y="449.5" ></text>
+</g>
+<g >
+<title>do_syscall_64 (1 samples, 0.25%)</title><rect x="49.6" y="757" width="5.0" height="19.0" fill="rgb(227,152,35)" rx="2" ry="2" />
+<text  x="52.60" y="769.5" ></text>
+</g>
+<g >
+<title>_extract_crng (13 samples, 3.25%)</title><rect x="287.2" y="617" width="64.4" height="19.0" fill="rgb(247,60,6)" rx="2" ry="2" />
+<text  x="290.20" y="629.5" >_extrac..</text>
+</g>
+<g >
+<title>prepare_ftrace_return (2 samples, 0.50%)</title><rect x="1811.8" y="537" width="9.9" height="19.0" fill="rgb(212,116,44)" rx="2" ry="2" />
+<text  x="1814.80" y="549.5" ></text>
+</g>
+<g >
+<title>ftrace_graph_caller (12 samples, 3.00%)</title><rect x="910.9" y="637" width="59.4" height="19.0" fill="rgb(210,80,53)" rx="2" ry="2" />
+<text  x="913.90" y="649.5" >ftrace..</text>
+</g>
+<g >
+<title>ftrace_graph_caller (4 samples, 1.00%)</title><rect x="1747.5" y="457" width="19.7" height="19.0" fill="rgb(231,97,9)" rx="2" ry="2" />
+<text  x="1750.45" y="469.5" ></text>
+</g>
+<g >
+<title>ftrace_graph_caller (1 samples, 0.25%)</title><rect x="138.7" y="697" width="5.0" height="19.0" fill="rgb(233,51,14)" rx="2" ry="2" />
+<text  x="141.70" y="709.5" ></text>
+</g>
+<g >
+<title>prepare_ftrace_return (1 samples, 0.25%)</title><rect x="1470.2" y="477" width="5.0" height="19.0" fill="rgb(216,22,0)" rx="2" ry="2" />
+<text  x="1473.25" y="489.5" ></text>
+</g>
+<g >
+<title>mem_cgroup_try_charge (1 samples, 0.25%)</title><rect x="1430.7" y="517" width="4.9" height="19.0" fill="rgb(230,47,14)" rx="2" ry="2" />
+<text  x="1433.65" y="529.5" ></text>
+</g>
+<g >
+<title>___slab_alloc (1 samples, 0.25%)</title><rect x="1351.5" y="477" width="4.9" height="19.0" fill="rgb(227,55,22)" rx="2" ry="2" />
+<text  x="1354.45" y="489.5" ></text>
+</g>
+<g >
+<title>ftrace_graph_caller (1 samples, 0.25%)</title><rect x="1896.0" y="637" width="4.9" height="19.0" fill="rgb(235,219,32)" rx="2" ry="2" />
+<text  x="1898.95" y="649.5" ></text>
+</g>
+<g >
+<title>trace_clock_local (2 samples, 0.50%)</title><rect x="366.4" y="597" width="9.9" height="19.0" fill="rgb(206,195,40)" rx="2" ry="2" />
+<text  x="369.40" y="609.5" ></text>
+</g>
+<g >
+<title>__vfs_write (153 samples, 38.25%)</title><rect x="1143.5" y="717" width="757.4" height="19.0" fill="rgb(226,201,41)" rx="2" ry="2" />
+<text  x="1146.55" y="729.5" >__vfs_write</text>
+</g>
+<g >
+<title>ftrace_graph_caller (1 samples, 0.25%)</title><rect x="1133.7" y="697" width="4.9" height="19.0" fill="rgb(219,10,17)" rx="2" ry="2" />
+<text  x="1136.65" y="709.5" ></text>
+</g>
+<g >
+<title>create_empty_buffers (2 samples, 0.50%)</title><rect x="1351.5" y="577" width="9.9" height="19.0" fill="rgb(228,118,39)" rx="2" ry="2" />
+<text  x="1354.45" y="589.5" ></text>
+</g>
+<g >
+<title>extract_crng (131 samples, 32.75%)</title><rect x="376.3" y="677" width="648.5" height="19.0" fill="rgb(237,58,0)" rx="2" ry="2" />
+<text  x="379.30" y="689.5" >extract_crng</text>
+</g>
+<g >
+<title>function_graph_enter (1 samples, 0.25%)</title><rect x="1193.0" y="437" width="5.0" height="19.0" fill="rgb(253,12,36)" rx="2" ry="2" />
+<text  x="1196.05" y="449.5" ></text>
+</g>
+<g >
+<title>__ext4_journal_start_sb (1 samples, 0.25%)</title><rect x="1193.0" y="557" width="5.0" height="19.0" fill="rgb(219,215,7)" rx="2" ry="2" />
+<text  x="1196.05" y="569.5" ></text>
+</g>
+<g >
+<title>function_graph_enter (1 samples, 0.25%)</title><rect x="1455.4" y="537" width="5.0" height="19.0" fill="rgb(252,59,40)" rx="2" ry="2" />
+<text  x="1458.40" y="549.5" ></text>
+</g>
+<g >
+<title>ext4_do_update_inode (32 samples, 8.00%)</title><rect x="1569.2" y="497" width="158.5" height="19.0" fill="rgb(234,66,46)" rx="2" ry="2" />
+<text  x="1572.25" y="509.5" >ext4_do_update_inode</text>
+</g>
+<g >
+<title>prepare_ftrace_return (1 samples, 0.25%)</title><rect x="1133.7" y="677" width="4.9" height="19.0" fill="rgb(208,121,38)" rx="2" ry="2" />
+<text  x="1136.65" y="689.5" ></text>
+</g>
+<g >
+<title>function_graph_enter (1 samples, 0.25%)</title><rect x="1064.4" y="597" width="4.9" height="19.0" fill="rgb(248,29,49)" rx="2" ry="2" />
+<text  x="1067.35" y="609.5" ></text>
+</g>
+<g >
+<title>current_kernel_time64 (1 samples, 0.25%)</title><rect x="1163.4" y="597" width="4.9" height="19.0" fill="rgb(238,43,17)" rx="2" ry="2" />
+<text  x="1166.35" y="609.5" ></text>
+</g>
+<g >
+<title>trace_clock_local (1 samples, 0.25%)</title><rect x="1831.6" y="477" width="4.9" height="19.0" fill="rgb(245,55,18)" rx="2" ry="2" />
+<text  x="1834.60" y="489.5" ></text>
+</g>
+<g >
+<title>function_graph_enter (2 samples, 0.50%)</title><rect x="123.9" y="657" width="9.9" height="19.0" fill="rgb(214,84,4)" rx="2" ry="2" />
+<text  x="126.85" y="669.5" ></text>
+</g>
+<g >
+<title>prepare_ftrace_return (1 samples, 0.25%)</title><rect x="1727.7" y="417" width="4.9" height="19.0" fill="rgb(224,41,35)" rx="2" ry="2" />
+<text  x="1730.65" y="429.5" ></text>
+</g>
+<g >
+<title>prepare_ftrace_return (1 samples, 0.25%)</title><rect x="1841.5" y="457" width="5.0" height="19.0" fill="rgb(226,217,18)" rx="2" ry="2" />
+<text  x="1844.50" y="469.5" ></text>
+</g>
+<g >
+<title>find_get_pages_range (1 samples, 0.25%)</title><rect x="1346.5" y="537" width="5.0" height="19.0" fill="rgb(233,113,42)" rx="2" ry="2" />
+<text  x="1349.50" y="549.5" ></text>
+</g>
+<g >
+<title>common_file_perm (4 samples, 1.00%)</title><rect x="1920.7" y="657" width="19.8" height="19.0" fill="rgb(242,81,1)" rx="2" ry="2" />
+<text  x="1923.70" y="669.5" ></text>
+</g>
+<g >
+<title>new_sync_write (152 samples, 38.00%)</title><rect x="1148.5" y="697" width="752.4" height="19.0" fill="rgb(230,93,0)" rx="2" ry="2" />
+<text  x="1151.50" y="709.5" >new_sync_write</text>
+</g>
+<g >
+<title>__test_set_page_writeback (3 samples, 0.75%)</title><rect x="29.8" y="477" width="14.8" height="19.0" fill="rgb(228,97,18)" rx="2" ry="2" />
+<text  x="32.80" y="489.5" ></text>
+</g>
+<g >
+<title>trace_graph_entry (1 samples, 0.25%)</title><rect x="1495.0" y="457" width="5.0" height="19.0" fill="rgb(208,17,22)" rx="2" ry="2" />
+<text  x="1498.00" y="469.5" ></text>
+</g>
+<g >
+<title>prepare_ftrace_return (1 samples, 0.25%)</title><rect x="1806.9" y="517" width="4.9" height="19.0" fill="rgb(251,39,25)" rx="2" ry="2" />
+<text  x="1809.85" y="529.5" ></text>
+</g>
+<g >
+<title>prepare_ftrace_return (3 samples, 0.75%)</title><rect x="1480.2" y="477" width="14.8" height="19.0" fill="rgb(254,142,45)" rx="2" ry="2" />
+<text  x="1483.15" y="489.5" ></text>
+</g>
+<g >
+<title>__mark_inode_dirty (1 samples, 0.25%)</title><rect x="1193.0" y="597" width="5.0" height="19.0" fill="rgb(230,219,46)" rx="2" ry="2" />
+<text  x="1196.05" y="609.5" ></text>
+</g>
+<g >
+<title>sched_clock (1 samples, 0.25%)</title><rect x="1797.0" y="357" width="4.9" height="19.0" fill="rgb(217,65,36)" rx="2" ry="2" />
+<text  x="1799.95" y="369.5" ></text>
+</g>
+<g >
+<title>dput (1 samples, 0.25%)</title><rect x="118.9" y="697" width="5.0" height="19.0" fill="rgb(244,22,39)" rx="2" ry="2" />
+<text  x="121.90" y="709.5" ></text>
+</g>
+<g >
+<title>__vfs_read (181 samples, 45.25%)</title><rect x="138.7" y="717" width="896.0" height="19.0" fill="rgb(217,12,12)" rx="2" ry="2" />
+<text  x="141.70" y="729.5" >__vfs_read</text>
+</g>
+<g >
+<title>chacha20_block (5 samples, 1.25%)</title><rect x="321.9" y="597" width="24.7" height="19.0" fill="rgb(205,229,21)" rx="2" ry="2" />
+<text  x="324.85" y="609.5" >c..</text>
+</g>
+<g >
+<title>trace_graph_entry (1 samples, 0.25%)</title><rect x="1232.7" y="517" width="4.9" height="19.0" fill="rgb(223,102,6)" rx="2" ry="2" />
+<text  x="1235.65" y="529.5" ></text>
+</g>
+<g >
+<title>function_graph_enter (1 samples, 0.25%)</title><rect x="1440.5" y="517" width="5.0" height="19.0" fill="rgb(217,214,9)" rx="2" ry="2" />
+<text  x="1443.55" y="529.5" ></text>
+</g>
+<g >
+<title>prepare_ftrace_return (1 samples, 0.25%)</title><rect x="1029.7" y="657" width="5.0" height="19.0" fill="rgb(220,193,4)" rx="2" ry="2" />
+<text  x="1032.70" y="669.5" ></text>
+</g>
+<g >
+<title>trace_graph_entry (5 samples, 1.25%)</title><rect x="940.6" y="577" width="24.8" height="19.0" fill="rgb(215,16,9)" rx="2" ry="2" />
+<text  x="943.60" y="589.5" >t..</text>
+</g>
+<g >
+<title>all (400 samples, 100%)</title><rect x="10.0" y="937" width="1980.0" height="19.0" fill="rgb(229,108,25)" rx="2" ry="2" />
+<text  x="13.00" y="949.5" ></text>
+</g>
+<g >
+<title>do_syscall_64 (8 samples, 2.00%)</title><rect x="10.0" y="757" width="39.6" height="19.0" fill="rgb(217,85,32)" rx="2" ry="2" />
+<text  x="13.00" y="769.5" >do_..</text>
+</g>
+<g >
+<title>prepare_ftrace_return (1 samples, 0.25%)</title><rect x="99.1" y="697" width="4.9" height="19.0" fill="rgb(232,11,34)" rx="2" ry="2" />
+<text  x="102.10" y="709.5" ></text>
+</g>
+<g >
+<title>sched_clock (2 samples, 0.50%)</title><rect x="1005.0" y="577" width="9.9" height="19.0" fill="rgb(208,30,25)" rx="2" ry="2" />
+<text  x="1007.95" y="589.5" ></text>
+</g>
+<g >
+<title>sched_clock (1 samples, 0.25%)</title><rect x="658.5" y="537" width="4.9" height="19.0" fill="rgb(245,14,18)" rx="2" ry="2" />
+<text  x="661.45" y="549.5" ></text>
+</g>
+<g >
+<title>prepare_ftrace_return (2 samples, 0.50%)</title><rect x="1688.0" y="417" width="10.0" height="19.0" fill="rgb(234,229,50)" rx="2" ry="2" />
+<text  x="1691.05" y="429.5" ></text>
+</g>
+<g >
+<title>mod_node_page_state (1 samples, 0.25%)</title><rect x="19.9" y="477" width="5.0" height="19.0" fill="rgb(239,183,7)" rx="2" ry="2" />
+<text  x="22.90" y="489.5" ></text>
+</g>
+<g >
+<title>prepare_ftrace_return (1 samples, 0.25%)</title><rect x="1559.4" y="457" width="4.9" height="19.0" fill="rgb(221,126,30)" rx="2" ry="2" />
+<text  x="1562.35" y="469.5" ></text>
+</g>
+<g >
+<title>trace_graph_entry (1 samples, 0.25%)</title><rect x="1282.2" y="477" width="4.9" height="19.0" fill="rgb(215,97,21)" rx="2" ry="2" />
+<text  x="1285.15" y="489.5" ></text>
+</g>
+<g >
+<title>dd (395 samples, 98.75%)</title><rect x="10.0" y="917" width="1955.2" height="19.0" fill="rgb(210,148,8)" rx="2" ry="2" />
+<text  x="13.00" y="929.5" >dd</text>
+</g>
+<g >
+<title>do_syscall_64 (5 samples, 1.25%)</title><rect x="1965.2" y="877" width="24.8" height="19.0" fill="rgb(248,169,4)" rx="2" ry="2" />
+<text  x="1968.25" y="889.5" >d..</text>
+</g>
+<g >
+<title>apparmor_file_permission (2 samples, 0.50%)</title><rect x="1079.2" y="677" width="9.9" height="19.0" fill="rgb(245,80,29)" rx="2" ry="2" />
+<text  x="1082.20" y="689.5" ></text>
+</g>
+<g >
+<title>extract_crng (13 samples, 3.25%)</title><rect x="287.2" y="637" width="64.4" height="19.0" fill="rgb(252,9,13)" rx="2" ry="2" />
+<text  x="290.20" y="649.5" >extract..</text>
+</g>
+<g >
+<title>__wake_up_common_lock (7 samples, 1.75%)</title><rect x="1465.3" y="537" width="34.7" height="19.0" fill="rgb(246,60,20)" rx="2" ry="2" />
+<text  x="1468.30" y="549.5" >__..</text>
+</g>
+<g >
+<title>__mark_inode_dirty (60 samples, 15.00%)</title><rect x="1524.7" y="577" width="297.0" height="19.0" fill="rgb(243,27,29)" rx="2" ry="2" />
+<text  x="1527.70" y="589.5" >__mark_inode_dirty</text>
+</g>
+<g >
+<title>native_sched_clock (1 samples, 0.25%)</title><rect x="935.6" y="537" width="5.0" height="19.0" fill="rgb(232,18,9)" rx="2" ry="2" />
+<text  x="938.65" y="549.5" ></text>
+</g>
+<g >
+<title>function_graph_enter (2 samples, 0.50%)</title><rect x="366.4" y="617" width="9.9" height="19.0" fill="rgb(209,177,46)" rx="2" ry="2" />
+<text  x="369.40" y="629.5" ></text>
+</g>
+<g >
+<title>jbd2__journal_start (1 samples, 0.25%)</title><rect x="1544.5" y="517" width="5.0" height="19.0" fill="rgb(242,56,42)" rx="2" ry="2" />
+<text  x="1547.50" y="529.5" ></text>
+</g>
+<g >
+<title>generic_write_end (69 samples, 17.25%)</title><rect x="1524.7" y="597" width="341.5" height="19.0" fill="rgb(250,172,29)" rx="2" ry="2" />
+<text  x="1527.70" y="609.5" >generic_write_end</text>
+</g>
+<g >
+<title>prepare_ftrace_return (2 samples, 0.50%)</title><rect x="1118.8" y="697" width="9.9" height="19.0" fill="rgb(253,28,6)" rx="2" ry="2" />
+<text  x="1121.80" y="709.5" ></text>
+</g>
+<g >
+<title>start_this_handle (9 samples, 2.25%)</title><rect x="1292.0" y="557" width="44.6" height="19.0" fill="rgb(219,150,54)" rx="2" ry="2" />
+<text  x="1295.05" y="569.5" >star..</text>
+</g>
+<g >
+<title>native_sched_clock (1 samples, 0.25%)</title><rect x="658.5" y="517" width="4.9" height="19.0" fill="rgb(237,198,21)" rx="2" ry="2" />
+<text  x="661.45" y="529.5" ></text>
+</g>
+<g >
+<title>ftrace_graph_caller (1 samples, 0.25%)</title><rect x="1064.4" y="637" width="4.9" height="19.0" fill="rgb(214,164,27)" rx="2" ry="2" />
+<text  x="1067.35" y="649.5" ></text>
+</g>
+<g >
+<title>sched_clock (1 samples, 0.25%)</title><rect x="1227.7" y="517" width="5.0" height="19.0" fill="rgb(252,198,5)" rx="2" ry="2" />
+<text  x="1230.70" y="529.5" ></text>
+</g>
+<g >
+<title>pagecache_get_page (12 samples, 3.00%)</title><rect x="1386.1" y="577" width="59.4" height="19.0" fill="rgb(228,68,38)" rx="2" ry="2" />
+<text  x="1389.10" y="589.5" >pageca..</text>
+</g>
+<g >
+<title>__indirect_thunk_start (1 samples, 0.25%)</title><rect x="133.8" y="717" width="4.9" height="19.0" fill="rgb(242,13,50)" rx="2" ry="2" />
+<text  x="136.75" y="729.5" ></text>
+</g>
+<g >
+<title>rcu_all_qs (1 samples, 0.25%)</title><rect x="1777.2" y="457" width="4.9" height="19.0" fill="rgb(206,2,49)" rx="2" ry="2" />
+<text  x="1780.15" y="469.5" ></text>
+</g>
+<g >
+<title>handle_irq_event (1 samples, 0.25%)</title><rect x="39.7" y="297" width="4.9" height="19.0" fill="rgb(208,135,48)" rx="2" ry="2" />
+<text  x="42.70" y="309.5" ></text>
+</g>
+<g >
+<title>ftrace_graph_caller (1 samples, 0.25%)</title><rect x="1475.2" y="497" width="5.0" height="19.0" fill="rgb(238,88,35)" rx="2" ry="2" />
+<text  x="1478.20" y="509.5" ></text>
+</g>
+<g >
+<title>ftrace_graph_caller (1 samples, 0.25%)</title><rect x="1079.2" y="617" width="5.0" height="19.0" fill="rgb(226,219,54)" rx="2" ry="2" />
+<text  x="1082.20" y="629.5" ></text>
+</g>
+<g >
+<title>prepare_ftrace_return (1 samples, 0.25%)</title><rect x="1336.6" y="557" width="4.9" height="19.0" fill="rgb(208,6,15)" rx="2" ry="2" />
+<text  x="1339.60" y="569.5" ></text>
+</g>
+<g >
+<title>prepare_ftrace_return (1 samples, 0.25%)</title><rect x="1376.2" y="517" width="5.0" height="19.0" fill="rgb(207,51,3)" rx="2" ry="2" />
+<text  x="1379.20" y="529.5" ></text>
+</g>
+<g >
+<title>SYSC_newfstat (1 samples, 0.25%)</title><rect x="1960.3" y="777" width="4.9" height="19.0" fill="rgb(242,165,51)" rx="2" ry="2" />
+<text  x="1963.30" y="789.5" ></text>
+</g>
+<g >
+<title>mark_buffer_dirty (2 samples, 0.50%)</title><rect x="1836.5" y="537" width="10.0" height="19.0" fill="rgb(243,218,20)" rx="2" ry="2" />
+<text  x="1839.55" y="549.5" ></text>
+</g>
+<g >
+<title>native_sched_clock (1 samples, 0.25%)</title><rect x="1797.0" y="337" width="4.9" height="19.0" fill="rgb(251,152,32)" rx="2" ry="2" />
+<text  x="1799.95" y="349.5" ></text>
+</g>
+<g >
+<title>ftrace_graph_caller (2 samples, 0.50%)</title><rect x="1183.2" y="617" width="9.8" height="19.0" fill="rgb(239,198,37)" rx="2" ry="2" />
+<text  x="1186.15" y="629.5" ></text>
+</g>
+<g >
+<title>trace_graph_entry (1 samples, 0.25%)</title><rect x="1905.9" y="657" width="4.9" height="19.0" fill="rgb(226,112,2)" rx="2" ry="2" />
+<text  x="1908.85" y="669.5" ></text>
+</g>
+<g >
+<title>native_sched_clock (1 samples, 0.25%)</title><rect x="1207.9" y="537" width="5.0" height="19.0" fill="rgb(211,54,4)" rx="2" ry="2" />
+<text  x="1210.90" y="549.5" ></text>
+</g>
+<g >
+<title>prepare_ftrace_return (1 samples, 0.25%)</title><rect x="1678.2" y="437" width="4.9" height="19.0" fill="rgb(252,33,17)" rx="2" ry="2" />
+<text  x="1681.15" y="449.5" ></text>
+</g>
+<g >
+<title>trace_clock_local (1 samples, 0.25%)</title><rect x="1158.4" y="557" width="5.0" height="19.0" fill="rgb(227,153,49)" rx="2" ry="2" />
+<text  x="1161.40" y="569.5" ></text>
+</g>
+<g >
+<title>trace_clock_local (2 samples, 0.50%)</title><rect x="1757.4" y="397" width="9.8" height="19.0" fill="rgb(233,91,27)" rx="2" ry="2" />
+<text  x="1760.35" y="409.5" ></text>
+</g>
+<g >
+<title>handle_irq_event_percpu (1 samples, 0.25%)</title><rect x="39.7" y="277" width="4.9" height="19.0" fill="rgb(228,40,41)" rx="2" ry="2" />
+<text  x="42.70" y="289.5" ></text>
+</g>
+<g >
+<title>ext4_reserve_inode_write (16 samples, 4.00%)</title><rect x="1727.7" y="517" width="79.2" height="19.0" fill="rgb(229,199,9)" rx="2" ry="2" />
+<text  x="1730.65" y="529.5" >ext4_rese..</text>
+</g>
+<g >
+<title>function_graph_enter (1 samples, 0.25%)</title><rect x="1579.2" y="417" width="4.9" height="19.0" fill="rgb(211,79,9)" rx="2" ry="2" />
+<text  x="1582.15" y="429.5" ></text>
+</g>
+<g >
+<title>rcu_all_qs (1 samples, 0.25%)</title><rect x="1232.7" y="597" width="4.9" height="19.0" fill="rgb(212,179,54)" rx="2" ry="2" />
+<text  x="1235.65" y="609.5" ></text>
+</g>
+<g >
+<title>sched_clock (1 samples, 0.25%)</title><rect x="1039.6" y="617" width="4.9" height="19.0" fill="rgb(223,15,30)" rx="2" ry="2" />
+<text  x="1042.60" y="629.5" ></text>
+</g>
+<g >
+<title>ext4_dirty_inode (1 samples, 0.25%)</title><rect x="1193.0" y="577" width="5.0" height="19.0" fill="rgb(238,34,6)" rx="2" ry="2" />
+<text  x="1196.05" y="589.5" ></text>
+</g>
+<g >
+<title>ftrace_graph_caller (2 samples, 0.50%)</title><rect x="1811.8" y="557" width="9.9" height="19.0" fill="rgb(219,53,5)" rx="2" ry="2" />
+<text  x="1814.80" y="569.5" ></text>
+</g>
+<g >
+<title>ftrace_graph_caller (11 samples, 2.75%)</title><rect x="148.6" y="637" width="54.5" height="19.0" fill="rgb(253,181,34)" rx="2" ry="2" />
+<text  x="151.60" y="649.5" >ftrac..</text>
+</g>
+<g >
+<title>sys_openat (1 samples, 0.25%)</title><rect x="49.6" y="737" width="5.0" height="19.0" fill="rgb(243,2,45)" rx="2" ry="2" />
+<text  x="52.60" y="749.5" ></text>
+</g>
+<g >
+<title>ftrace_graph_caller (1 samples, 0.25%)</title><rect x="1282.2" y="537" width="4.9" height="19.0" fill="rgb(223,218,16)" rx="2" ry="2" />
+<text  x="1285.15" y="549.5" ></text>
+</g>
+<g >
+<title>ftrace_graph_caller (1 samples, 0.25%)</title><rect x="1797.0" y="437" width="4.9" height="19.0" fill="rgb(213,196,13)" rx="2" ry="2" />
+<text  x="1799.95" y="449.5" ></text>
+</g>
+<g >
+<title>prepare_ftrace_return (1 samples, 0.25%)</title><rect x="1792.0" y="437" width="5.0" height="19.0" fill="rgb(237,152,40)" rx="2" ry="2" />
+<text  x="1795.00" y="449.5" ></text>
+</g>
+<g >
+<title>ftrace_lookup_ip (1 samples, 0.25%)</title><rect x="1321.8" y="437" width="4.9" height="19.0" fill="rgb(221,16,29)" rx="2" ry="2" />
+<text  x="1324.75" y="449.5" ></text>
+</g>
+<g >
+<title>ftrace_lookup_ip (1 samples, 0.25%)</title><rect x="1232.7" y="497" width="4.9" height="19.0" fill="rgb(250,135,40)" rx="2" ry="2" />
+<text  x="1235.65" y="509.5" ></text>
+</g>
+<g >
+<title>native_sched_clock (1 samples, 0.25%)</title><rect x="178.3" y="537" width="4.9" height="19.0" fill="rgb(234,152,30)" rx="2" ry="2" />
+<text  x="181.30" y="549.5" ></text>
+</g>
+<g >
+<title>function_graph_enter (1 samples, 0.25%)</title><rect x="1306.9" y="477" width="5.0" height="19.0" fill="rgb(226,170,35)" rx="2" ry="2" />
+<text  x="1309.90" y="489.5" ></text>
+</g>
+<g >
+<title>function_graph_enter (1 samples, 0.25%)</title><rect x="1495.0" y="477" width="5.0" height="19.0" fill="rgb(208,196,7)" rx="2" ry="2" />
+<text  x="1498.00" y="489.5" ></text>
+</g>
+<g >
+<title>ftrace_graph_caller (1 samples, 0.25%)</title><rect x="1381.2" y="577" width="4.9" height="19.0" fill="rgb(232,177,38)" rx="2" ry="2" />
+<text  x="1384.15" y="589.5" ></text>
+</g>
+<g >
+<title>trace_graph_entry (1 samples, 0.25%)</title><rect x="1410.9" y="457" width="4.9" height="19.0" fill="rgb(235,53,45)" rx="2" ry="2" />
+<text  x="1413.85" y="469.5" ></text>
+</g>
+<g >
+<title>trace_graph_entry (2 samples, 0.50%)</title><rect x="663.4" y="557" width="9.9" height="19.0" fill="rgb(207,198,0)" rx="2" ry="2" />
+<text  x="666.40" y="569.5" ></text>
+</g>
+<g >
+<title>ext4_da_write_begin (43 samples, 10.75%)</title><rect x="1247.5" y="617" width="212.9" height="19.0" fill="rgb(214,42,13)" rx="2" ry="2" />
+<text  x="1250.50" y="629.5" >ext4_da_write_begin</text>
+</g>
+<g >
+<title>__GI___libc_read (211 samples, 52.75%)</title><rect x="54.6" y="817" width="1044.4" height="19.0" fill="rgb(248,91,27)" rx="2" ry="2" />
+<text  x="57.55" y="829.5" >__GI___libc_read</text>
+</g>
+<g >
+<title>__intel_pmu_enable_all.constprop.23 (4 samples, 1.00%)</title><rect x="1965.2" y="677" width="19.9" height="19.0" fill="rgb(224,224,30)" rx="2" ry="2" />
+<text  x="1968.25" y="689.5" ></text>
+</g>
+<g >
+<title>function_graph_enter (1 samples, 0.25%)</title><rect x="1797.0" y="397" width="4.9" height="19.0" fill="rgb(229,58,22)" rx="2" ry="2" />
+<text  x="1799.95" y="409.5" ></text>
+</g>
+<g >
+<title>prepare_ftrace_return (1 samples, 0.25%)</title><rect x="1440.5" y="537" width="5.0" height="19.0" fill="rgb(228,157,46)" rx="2" ry="2" />
+<text  x="1443.55" y="549.5" ></text>
+</g>
+<g >
+<title>ext4_do_update_inode (1 samples, 0.25%)</title><rect x="1564.3" y="517" width="4.9" height="19.0" fill="rgb(225,87,29)" rx="2" ry="2" />
+<text  x="1567.30" y="529.5" ></text>
+</g>
+<g >
+<title>ftrace_lookup_ip (1 samples, 0.25%)</title><rect x="153.6" y="597" width="4.9" height="19.0" fill="rgb(233,5,29)" rx="2" ry="2" />
+<text  x="156.55" y="609.5" ></text>
+</g>
+<g >
+<title>mpage_submit_page (8 samples, 2.00%)</title><rect x="10.0" y="517" width="39.6" height="19.0" fill="rgb(226,113,18)" rx="2" ry="2" />
+<text  x="13.00" y="529.5" >mpa..</text>
+</g>
+<g >
+<title>trace_clock_local (1 samples, 0.25%)</title><rect x="935.6" y="577" width="5.0" height="19.0" fill="rgb(240,169,16)" rx="2" ry="2" />
+<text  x="938.65" y="589.5" ></text>
+</g>
+<g >
+<title>nvme_complete_rq (1 samples, 0.25%)</title><rect x="39.7" y="137" width="4.9" height="19.0" fill="rgb(241,140,48)" rx="2" ry="2" />
+<text  x="42.70" y="149.5" ></text>
+</g>
+<g >
+<title>ftrace_graph_caller (1 samples, 0.25%)</title><rect x="1113.9" y="697" width="4.9" height="19.0" fill="rgb(245,205,7)" rx="2" ry="2" />
+<text  x="1116.85" y="709.5" ></text>
+</g>
+<g >
+<title>trace_graph_entry (1 samples, 0.25%)</title><rect x="1074.2" y="557" width="5.0" height="19.0" fill="rgb(227,168,47)" rx="2" ry="2" />
+<text  x="1077.25" y="569.5" ></text>
+</g>
+<g >
+<title>ftrace_graph_caller (1 samples, 0.25%)</title><rect x="1371.2" y="557" width="5.0" height="19.0" fill="rgb(253,81,36)" rx="2" ry="2" />
+<text  x="1374.25" y="569.5" ></text>
+</g>
+<g >
+<title>perf_event_exec (4 samples, 1.00%)</title><rect x="1965.2" y="757" width="19.9" height="19.0" fill="rgb(206,158,43)" rx="2" ry="2" />
+<text  x="1968.25" y="769.5" ></text>
+</g>
+<g >
+<title>trace_graph_entry (1 samples, 0.25%)</title><rect x="1356.4" y="417" width="5.0" height="19.0" fill="rgb(216,140,14)" rx="2" ry="2" />
+<text  x="1359.40" y="429.5" ></text>
+</g>
+<g >
+<title>function_graph_enter (1 samples, 0.25%)</title><rect x="1143.5" y="657" width="5.0" height="19.0" fill="rgb(215,113,7)" rx="2" ry="2" />
+<text  x="1146.55" y="669.5" ></text>
+</g>
+<g >
+<title>__fget_light (2 samples, 0.50%)</title><rect x="89.2" y="717" width="9.9" height="19.0" fill="rgb(218,206,46)" rx="2" ry="2" />
+<text  x="92.20" y="729.5" ></text>
+</g>
+<g >
+<title>ext4_finish_bio (1 samples, 0.25%)</title><rect x="39.7" y="37" width="4.9" height="19.0" fill="rgb(232,18,30)" rx="2" ry="2" />
+<text  x="42.70" y="49.5" ></text>
+</g>
+<g >
+<title>trace_clock_local (1 samples, 0.25%)</title><rect x="1514.8" y="497" width="5.0" height="19.0" fill="rgb(207,206,22)" rx="2" ry="2" />
+<text  x="1517.80" y="509.5" ></text>
+</g>
+<g >
+<title>ftrace_lookup_ip (1 samples, 0.25%)</title><rect x="118.9" y="597" width="5.0" height="19.0" fill="rgb(218,51,37)" rx="2" ry="2" />
+<text  x="121.90" y="609.5" ></text>
+</g>
+<g >
+<title>rcu_all_qs (1 samples, 0.25%)</title><rect x="1247.5" y="537" width="5.0" height="19.0" fill="rgb(220,151,53)" rx="2" ry="2" />
+<text  x="1250.50" y="549.5" ></text>
+</g>
+<g >
+<title>alloc_buffer_head (2 samples, 0.50%)</title><rect x="1351.5" y="537" width="9.9" height="19.0" fill="rgb(221,137,27)" rx="2" ry="2" />
+<text  x="1354.45" y="549.5" ></text>
+</g>
+<g >
+<title>function_graph_enter (1 samples, 0.25%)</title><rect x="19.9" y="417" width="5.0" height="19.0" fill="rgb(226,87,16)" rx="2" ry="2" />
+<text  x="22.90" y="429.5" ></text>
+</g>
+<g >
+<title>blk_update_request (1 samples, 0.25%)</title><rect x="39.7" y="97" width="4.9" height="19.0" fill="rgb(219,149,23)" rx="2" ry="2" />
+<text  x="42.70" y="109.5" ></text>
+</g>
+<g >
+<title>handle_edge_irq (1 samples, 0.25%)</title><rect x="39.7" y="317" width="4.9" height="19.0" fill="rgb(250,56,43)" rx="2" ry="2" />
+<text  x="42.70" y="329.5" ></text>
+</g>
+<g >
+<title>trace_clock_local (1 samples, 0.25%)</title><rect x="1797.0" y="377" width="4.9" height="19.0" fill="rgb(240,200,25)" rx="2" ry="2" />
+<text  x="1799.95" y="389.5" ></text>
+</g>
+<g >
+<title>prepare_ftrace_return (11 samples, 2.75%)</title><rect x="148.6" y="617" width="54.5" height="19.0" fill="rgb(215,163,11)" rx="2" ry="2" />
+<text  x="151.60" y="629.5" >prepa..</text>
+</g>
+<g >
+<title>trace_graph_entry (2 samples, 0.50%)</title><rect x="1014.9" y="597" width="9.9" height="19.0" fill="rgb(227,63,3)" rx="2" ry="2" />
+<text  x="1017.85" y="609.5" ></text>
+</g>
+<g >
+<title>mpage_map_and_submit_buffers (8 samples, 2.00%)</title><rect x="10.0" y="537" width="39.6" height="19.0" fill="rgb(221,88,54)" rx="2" ry="2" />
+<text  x="13.00" y="549.5" >mpa..</text>
+</g>
+<g >
+<title>ftrace_lookup_ip (1 samples, 0.25%)</title><rect x="237.7" y="577" width="5.0" height="19.0" fill="rgb(235,24,42)" rx="2" ry="2" />
+<text  x="240.70" y="589.5" ></text>
+</g>
+<g >
+<title>sched_clock (1 samples, 0.25%)</title><rect x="371.4" y="577" width="4.9" height="19.0" fill="rgb(207,120,6)" rx="2" ry="2" />
+<text  x="374.35" y="589.5" ></text>
+</g>
+<g >
+<title>prepare_ftrace_return (1 samples, 0.25%)</title><rect x="1420.8" y="497" width="4.9" height="19.0" fill="rgb(212,144,10)" rx="2" ry="2" />
+<text  x="1423.75" y="509.5" ></text>
+</g>
+<g >
+<title>prepare_ftrace_return (1 samples, 0.25%)</title><rect x="1321.8" y="497" width="4.9" height="19.0" fill="rgb(215,116,31)" rx="2" ry="2" />
+<text  x="1324.75" y="509.5" ></text>
+</g>
+<g >
+<title>ftrace_lookup_ip (1 samples, 0.25%)</title><rect x="1871.2" y="557" width="5.0" height="19.0" fill="rgb(228,76,2)" rx="2" ry="2" />
+<text  x="1874.20" y="569.5" ></text>
+</g>
+<g >
+<title>ftrace_lookup_ip (1 samples, 0.25%)</title><rect x="1905.9" y="637" width="4.9" height="19.0" fill="rgb(213,93,39)" rx="2" ry="2" />
+<text  x="1908.85" y="649.5" ></text>
+</g>
+<g >
+<title>__handle_irq_event_percpu (1 samples, 0.25%)</title><rect x="39.7" y="257" width="4.9" height="19.0" fill="rgb(233,164,20)" rx="2" ry="2" />
+<text  x="42.70" y="269.5" ></text>
+</g>
+<g >
+<title>ftrace_graph_caller (10 samples, 2.50%)</title><rect x="975.2" y="657" width="49.6" height="19.0" fill="rgb(251,130,26)" rx="2" ry="2" />
+<text  x="978.25" y="669.5" >ftra..</text>
+</g>
+<g >
+<title>trace_clock_local (1 samples, 0.25%)</title><rect x="356.5" y="577" width="4.9" height="19.0" fill="rgb(225,13,14)" rx="2" ry="2" />
+<text  x="359.50" y="589.5" ></text>
+</g>
+<g >
+<title>trace_clock_local (1 samples, 0.25%)</title><rect x="1881.1" y="597" width="4.9" height="19.0" fill="rgb(232,80,1)" rx="2" ry="2" />
+<text  x="1884.10" y="609.5" ></text>
+</g>
+<g >
+<title>prepare_ftrace_return (1 samples, 0.25%)</title><rect x="1900.9" y="677" width="5.0" height="19.0" fill="rgb(250,156,54)" rx="2" ry="2" />
+<text  x="1903.90" y="689.5" ></text>
+</g>
+<g >
+<title>trace_graph_entry (1 samples, 0.25%)</title><rect x="128.8" y="637" width="5.0" height="19.0" fill="rgb(243,166,11)" rx="2" ry="2" />
+<text  x="131.80" y="649.5" ></text>
+</g>
+<g >
+<title>_raw_spin_lock_irqsave (1 samples, 0.25%)</title><rect x="970.3" y="657" width="4.9" height="19.0" fill="rgb(237,143,44)" rx="2" ry="2" />
+<text  x="973.30" y="669.5" ></text>
+</g>
+<g >
+<title>function_graph_enter (1 samples, 0.25%)</title><rect x="1544.5" y="457" width="5.0" height="19.0" fill="rgb(214,167,23)" rx="2" ry="2" />
+<text  x="1547.50" y="469.5" ></text>
+</g>
+<g >
+<title>trace_graph_entry (1 samples, 0.25%)</title><rect x="1366.3" y="437" width="4.9" height="19.0" fill="rgb(212,126,36)" rx="2" ry="2" />
+<text  x="1369.30" y="449.5" ></text>
+</g>
+<g >
+<title>trace_clock_local (1 samples, 0.25%)</title><rect x="178.3" y="577" width="4.9" height="19.0" fill="rgb(210,68,27)" rx="2" ry="2" />
+<text  x="181.30" y="589.5" ></text>
+</g>
+<g >
+<title>ftrace_graph_caller (1 samples, 0.25%)</title><rect x="1232.7" y="577" width="4.9" height="19.0" fill="rgb(253,164,34)" rx="2" ry="2" />
+<text  x="1235.65" y="589.5" ></text>
+</g>
+<g >
+<title>trace_graph_entry (1 samples, 0.25%)</title><rect x="1539.5" y="417" width="5.0" height="19.0" fill="rgb(215,67,22)" rx="2" ry="2" />
+<text  x="1542.55" y="429.5" ></text>
+</g>
+<g >
+<title>prepare_ftrace_return (1 samples, 0.25%)</title><rect x="1950.4" y="657" width="5.0" height="19.0" fill="rgb(249,181,16)" rx="2" ry="2" />
+<text  x="1953.40" y="669.5" ></text>
+</g>
+<g >
+<title>_extract_crng (119 samples, 29.75%)</title><rect x="381.2" y="657" width="589.1" height="19.0" fill="rgb(250,12,23)" rx="2" ry="2" />
+<text  x="384.25" y="669.5" >_extract_crng</text>
+</g>
+<g >
+<title>dget_parent (1 samples, 0.25%)</title><rect x="114.0" y="697" width="4.9" height="19.0" fill="rgb(225,106,23)" rx="2" ry="2" />
+<text  x="116.95" y="709.5" ></text>
+</g>
+<g >
+<title>trace_graph_entry (2 samples, 0.50%)</title><rect x="1688.0" y="397" width="10.0" height="19.0" fill="rgb(244,165,30)" rx="2" ry="2" />
+<text  x="1691.05" y="409.5" ></text>
+</g>
+<g >
+<title>trace_graph_entry (1 samples, 0.25%)</title><rect x="1891.0" y="617" width="5.0" height="19.0" fill="rgb(215,183,8)" rx="2" ry="2" />
+<text  x="1894.00" y="629.5" ></text>
+</g>
+<g >
+<title>prepare_ftrace_return (1 samples, 0.25%)</title><rect x="1054.5" y="677" width="4.9" height="19.0" fill="rgb(223,6,53)" rx="2" ry="2" />
+<text  x="1057.45" y="689.5" ></text>
+</g>
+<g >
+<title>ext4_mark_inode_dirty (51 samples, 12.75%)</title><rect x="1554.4" y="537" width="252.5" height="19.0" fill="rgb(206,210,50)" rx="2" ry="2" />
+<text  x="1557.40" y="549.5" >ext4_mark_inode_dirty</text>
+</g>
+<g >
+<title>trace_graph_entry (1 samples, 0.25%)</title><rect x="1816.8" y="517" width="4.9" height="19.0" fill="rgb(253,59,6)" rx="2" ry="2" />
+<text  x="1819.75" y="529.5" ></text>
+</g>
+<g >
+<title>function_graph_enter (1 samples, 0.25%)</title><rect x="1594.0" y="377" width="5.0" height="19.0" fill="rgb(236,36,39)" rx="2" ry="2" />
+<text  x="1597.00" y="389.5" ></text>
+</g>
+<g >
+<title>perf (5 samples, 1.25%)</title><rect x="1965.2" y="917" width="24.8" height="19.0" fill="rgb(205,73,38)" rx="2" ry="2" />
+<text  x="1968.25" y="929.5" >p..</text>
+</g>
+<g >
+<title>prepare_ftrace_return (1 samples, 0.25%)</title><rect x="1207.9" y="617" width="5.0" height="19.0" fill="rgb(240,185,45)" rx="2" ry="2" />
+<text  x="1210.90" y="629.5" ></text>
+</g>
+<g >
+<title>trace_graph_entry (1 samples, 0.25%)</title><rect x="1143.5" y="637" width="5.0" height="19.0" fill="rgb(235,56,34)" rx="2" ry="2" />
+<text  x="1146.55" y="649.5" ></text>
+</g>
+<g >
+<title>function_graph_enter (1 samples, 0.25%)</title><rect x="1410.9" y="477" width="4.9" height="19.0" fill="rgb(248,10,32)" rx="2" ry="2" />
+<text  x="1413.85" y="489.5" ></text>
+</g>
+<g >
+<title>prepare_ftrace_return (7 samples, 1.75%)</title><rect x="1643.5" y="397" width="34.7" height="19.0" fill="rgb(206,37,21)" rx="2" ry="2" />
+<text  x="1646.50" y="409.5" >pr..</text>
+</g>
+<g >
+<title>task_work_run (8 samples, 2.00%)</title><rect x="10.0" y="717" width="39.6" height="19.0" fill="rgb(221,135,28)" rx="2" ry="2" />
+<text  x="13.00" y="729.5" >tas..</text>
+</g>
+<g >
+<title>prepare_ftrace_return (1 samples, 0.25%)</title><rect x="1401.0" y="477" width="4.9" height="19.0" fill="rgb(205,81,11)" rx="2" ry="2" />
+<text  x="1403.95" y="489.5" ></text>
+</g>
+<g >
+<title>prepare_ftrace_return (2 samples, 0.50%)</title><rect x="1509.9" y="537" width="9.9" height="19.0" fill="rgb(222,12,19)" rx="2" ry="2" />
+<text  x="1512.85" y="549.5" ></text>
+</g>
+<g >
+<title>ftrace_lookup_ip (1 samples, 0.25%)</title><rect x="1247.5" y="437" width="5.0" height="19.0" fill="rgb(206,227,52)" rx="2" ry="2" />
+<text  x="1250.50" y="449.5" ></text>
+</g>
+<g >
+<title>trace_clock_local (1 samples, 0.25%)</title><rect x="1420.8" y="457" width="4.9" height="19.0" fill="rgb(216,196,30)" rx="2" ry="2" />
+<text  x="1423.75" y="469.5" ></text>
+</g>
+<g >
+<title>ftrace_graph_caller (1 samples, 0.25%)</title><rect x="1836.5" y="457" width="5.0" height="19.0" fill="rgb(238,200,45)" rx="2" ry="2" />
+<text  x="1839.55" y="469.5" ></text>
+</g>
+<g >
+<title>sched_clock (1 samples, 0.25%)</title><rect x="1029.7" y="597" width="5.0" height="19.0" fill="rgb(240,211,44)" rx="2" ry="2" />
+<text  x="1032.70" y="609.5" ></text>
+</g>
+<g >
+<title>prepare_ftrace_return (1 samples, 0.25%)</title><rect x="1277.2" y="477" width="5.0" height="19.0" fill="rgb(205,8,8)" rx="2" ry="2" />
+<text  x="1280.20" y="489.5" ></text>
+</g>
+<g >
+<title>function_graph_enter (1 samples, 0.25%)</title><rect x="1366.3" y="457" width="4.9" height="19.0" fill="rgb(251,66,7)" rx="2" ry="2" />
+<text  x="1369.30" y="469.5" ></text>
+</g>
+<g >
+<title>sched_clock (1 samples, 0.25%)</title><rect x="1831.6" y="457" width="4.9" height="19.0" fill="rgb(249,180,9)" rx="2" ry="2" />
+<text  x="1834.60" y="469.5" ></text>
+</g>
+<g >
+<title>ftrace_graph_caller (6 samples, 1.50%)</title><rect x="584.2" y="617" width="29.7" height="19.0" fill="rgb(231,7,49)" rx="2" ry="2" />
+<text  x="587.20" y="629.5" >ft..</text>
+</g>
+<g >
+<title>__radix_tree_lookup (1 samples, 0.25%)</title><rect x="1435.6" y="537" width="4.9" height="19.0" fill="rgb(208,3,8)" rx="2" ry="2" />
+<text  x="1438.60" y="549.5" ></text>
+</g>
+<g >
+<title>copy_user_enhanced_fast_string (5 samples, 1.25%)</title><rect x="247.6" y="677" width="24.8" height="19.0" fill="rgb(230,225,25)" rx="2" ry="2" />
+<text  x="250.60" y="689.5" >c..</text>
+</g>
+<g >
+<title>ftrace_graph_caller (1 samples, 0.25%)</title><rect x="1806.9" y="537" width="4.9" height="19.0" fill="rgb(210,17,28)" rx="2" ry="2" />
+<text  x="1809.85" y="549.5" ></text>
+</g>
+<g >
+<title>ftrace_graph_caller (1 samples, 0.25%)</title><rect x="1054.5" y="697" width="4.9" height="19.0" fill="rgb(208,140,16)" rx="2" ry="2" />
+<text  x="1057.45" y="709.5" ></text>
+</g>
+<g >
+<title>do_filp_open (1 samples, 0.25%)</title><rect x="49.6" y="697" width="5.0" height="19.0" fill="rgb(206,182,40)" rx="2" ry="2" />
+<text  x="52.60" y="709.5" ></text>
+</g>
+<g >
+<title>function_graph_enter (1 samples, 0.25%)</title><rect x="1089.1" y="617" width="4.9" height="19.0" fill="rgb(244,3,38)" rx="2" ry="2" />
+<text  x="1092.10" y="629.5" ></text>
+</g>
+<g >
+<title>prepare_ftrace_return (11 samples, 2.75%)</title><rect x="915.9" y="617" width="54.4" height="19.0" fill="rgb(252,68,2)" rx="2" ry="2" />
+<text  x="918.85" y="629.5" >prepa..</text>
+</g>
+<g >
+<title>trace_graph_entry (1 samples, 0.25%)</title><rect x="1044.5" y="637" width="5.0" height="19.0" fill="rgb(248,157,37)" rx="2" ry="2" />
+<text  x="1047.55" y="649.5" ></text>
+</g>
+<g >
+<title>_raw_spin_lock_irqsave (1 samples, 0.25%)</title><rect x="1475.2" y="517" width="5.0" height="19.0" fill="rgb(236,6,15)" rx="2" ry="2" />
+<text  x="1478.20" y="529.5" ></text>
+</g>
+<g >
+<title>function_graph_enter (3 samples, 0.75%)</title><rect x="1217.8" y="557" width="14.9" height="19.0" fill="rgb(233,78,46)" rx="2" ry="2" />
+<text  x="1220.80" y="569.5" ></text>
+</g>
+<g >
+<title>function_graph_enter (1 samples, 0.25%)</title><rect x="1811.8" y="517" width="5.0" height="19.0" fill="rgb(242,207,53)" rx="2" ry="2" />
+<text  x="1814.80" y="529.5" ></text>
+</g>
+<g >
+<title>trace_clock_local (1 samples, 0.25%)</title><rect x="19.9" y="397" width="5.0" height="19.0" fill="rgb(212,227,1)" rx="2" ry="2" />
+<text  x="22.90" y="409.5" ></text>
+</g>
+<g >
+<title>function_graph_enter (1 samples, 0.25%)</title><rect x="1905.9" y="677" width="4.9" height="19.0" fill="rgb(248,207,51)" rx="2" ry="2" />
+<text  x="1908.85" y="689.5" ></text>
+</g>
+<g >
+<title>__GI___libc_write (174 samples, 43.50%)</title><rect x="1099.0" y="817" width="861.3" height="19.0" fill="rgb(205,172,49)" rx="2" ry="2" />
+<text  x="1102.00" y="829.5" >__GI___libc_write</text>
+</g>
+<g >
+<title>__es_remove_extent (1 samples, 0.25%)</title><rect x="1366.3" y="537" width="4.9" height="19.0" fill="rgb(229,89,37)" rx="2" ry="2" />
+<text  x="1369.30" y="549.5" ></text>
+</g>
+<g >
+<title>prepare_ftrace_return (1 samples, 0.25%)</title><rect x="1722.7" y="457" width="5.0" height="19.0" fill="rgb(248,211,26)" rx="2" ry="2" />
+<text  x="1725.70" y="469.5" ></text>
+</g>
+<g >
+<title>function_graph_enter (1 samples, 0.25%)</title><rect x="1262.4" y="517" width="4.9" height="19.0" fill="rgb(212,229,40)" rx="2" ry="2" />
+<text  x="1265.35" y="529.5" ></text>
+</g>
+<g >
+<title>prepare_ftrace_return (8 samples, 2.00%)</title><rect x="208.0" y="637" width="39.6" height="19.0" fill="rgb(218,157,30)" rx="2" ry="2" />
+<text  x="211.00" y="649.5" >pre..</text>
+</g>
+<g >
+<title>__GI___fxstat (1 samples, 0.25%)</title><rect x="1960.3" y="857" width="4.9" height="19.0" fill="rgb(205,204,50)" rx="2" ry="2" />
+<text  x="1963.30" y="869.5" ></text>
+</g>
+<g >
+<title>ftrace_graph_caller (1 samples, 0.25%)</title><rect x="1168.3" y="597" width="4.9" height="19.0" fill="rgb(242,160,27)" rx="2" ry="2" />
+<text  x="1171.30" y="609.5" ></text>
+</g>
+<g >
+<title>ftrace_graph_caller (1 samples, 0.25%)</title><rect x="14.9" y="477" width="5.0" height="19.0" fill="rgb(214,209,49)" rx="2" ry="2" />
+<text  x="17.95" y="489.5" ></text>
+</g>
+<g >
+<title>function_graph_enter (1 samples, 0.25%)</title><rect x="39.7" y="397" width="4.9" height="19.0" fill="rgb(243,79,49)" rx="2" ry="2" />
+<text  x="42.70" y="409.5" ></text>
+</g>
+<g >
+<title>function_graph_enter (1 samples, 0.25%)</title><rect x="1678.2" y="417" width="4.9" height="19.0" fill="rgb(222,74,54)" rx="2" ry="2" />
+<text  x="1681.15" y="429.5" ></text>
+</g>
+<g >
+<title>prepare_ftrace_return (1 samples, 0.25%)</title><rect x="1599.0" y="437" width="4.9" height="19.0" fill="rgb(229,198,39)" rx="2" ry="2" />
+<text  x="1601.95" y="449.5" ></text>
+</g>
+<g >
+<title>function_graph_enter (2 samples, 0.50%)</title><rect x="1153.5" y="577" width="9.9" height="19.0" fill="rgb(252,13,5)" rx="2" ry="2" />
+<text  x="1156.45" y="589.5" ></text>
+</g>
+<g >
+<title>function_graph_enter (1 samples, 0.25%)</title><rect x="1727.7" y="397" width="4.9" height="19.0" fill="rgb(237,56,47)" rx="2" ry="2" />
+<text  x="1730.65" y="409.5" ></text>
+</g>
+<g >
+<title>ftrace_graph_is_dead (1 samples, 0.25%)</title><rect x="1242.5" y="577" width="5.0" height="19.0" fill="rgb(227,93,30)" rx="2" ry="2" />
+<text  x="1245.55" y="589.5" ></text>
+</g>
+<g >
+<title>do_writepages (8 samples, 2.00%)</title><rect x="10.0" y="577" width="39.6" height="19.0" fill="rgb(234,201,6)" rx="2" ry="2" />
+<text  x="13.00" y="589.5" >do_..</text>
+</g>
+<g >
+<title>trace_clock_local (1 samples, 0.25%)</title><rect x="1207.9" y="577" width="5.0" height="19.0" fill="rgb(237,16,48)" rx="2" ry="2" />
+<text  x="1210.90" y="589.5" ></text>
+</g>
+<g >
+<title>up_read (1 samples, 0.25%)</title><rect x="1376.2" y="557" width="5.0" height="19.0" fill="rgb(217,209,19)" rx="2" ry="2" />
+<text  x="1379.20" y="569.5" ></text>
+</g>
+<g >
+<title>function_graph_enter (1 samples, 0.25%)</title><rect x="1371.2" y="517" width="5.0" height="19.0" fill="rgb(252,21,23)" rx="2" ry="2" />
+<text  x="1374.25" y="529.5" ></text>
+</g>
+<g >
+<title>jbd2_write_access_granted.part.9 (1 samples, 0.25%)</title><rect x="1797.0" y="457" width="4.9" height="19.0" fill="rgb(241,89,35)" rx="2" ry="2" />
+<text  x="1799.95" y="469.5" ></text>
+</g>
+<g >
+<title>ftrace_graph_caller (9 samples, 2.25%)</title><rect x="203.1" y="657" width="44.5" height="19.0" fill="rgb(229,143,20)" rx="2" ry="2" />
+<text  x="206.05" y="669.5" >ftra..</text>
+</g>
+<g >
+<title>rw_verify_area (9 samples, 2.25%)</title><rect x="1910.8" y="717" width="44.6" height="19.0" fill="rgb(254,10,11)" rx="2" ry="2" />
+<text  x="1913.80" y="729.5" >rw_v..</text>
+</g>
+<g >
+<title>function_graph_enter (2 samples, 0.50%)</title><rect x="1173.2" y="537" width="10.0" height="19.0" fill="rgb(232,86,39)" rx="2" ry="2" />
+<text  x="1176.25" y="549.5" ></text>
+</g>
+<g >
+<title>ftrace_graph_caller (2 samples, 0.50%)</title><rect x="1509.9" y="557" width="9.9" height="19.0" fill="rgb(233,23,5)" rx="2" ry="2" />
+<text  x="1512.85" y="569.5" ></text>
+</g>
+<g >
+<title>trace_clock_local (1 samples, 0.25%)</title><rect x="1029.7" y="617" width="5.0" height="19.0" fill="rgb(221,10,2)" rx="2" ry="2" />
+<text  x="1032.70" y="629.5" ></text>
+</g>
+<g >
+<title>radix_tree_tag_set (1 samples, 0.25%)</title><rect x="29.8" y="457" width="5.0" height="19.0" fill="rgb(226,100,10)" rx="2" ry="2" />
+<text  x="32.80" y="469.5" ></text>
+</g>
+<g >
+<title>trace_clock_local (1 samples, 0.25%)</title><rect x="1628.7" y="337" width="4.9" height="19.0" fill="rgb(221,97,36)" rx="2" ry="2" />
+<text  x="1631.65" y="349.5" ></text>
+</g>
+<g >
+<title>__entry_trampoline_start (1 samples, 0.25%)</title><rect x="54.6" y="797" width="4.9" height="19.0" fill="rgb(217,21,45)" rx="2" ry="2" />
+<text  x="57.55" y="809.5" ></text>
+</g>
+<g >
+<title>ftrace_graph_caller (2 samples, 0.50%)</title><rect x="1024.8" y="677" width="9.9" height="19.0" fill="rgb(246,37,48)" rx="2" ry="2" />
+<text  x="1027.75" y="689.5" ></text>
+</g>
+<g >
+<title>ftrace_graph_caller (1 samples, 0.25%)</title><rect x="1376.2" y="537" width="5.0" height="19.0" fill="rgb(242,128,32)" rx="2" ry="2" />
+<text  x="1379.20" y="549.5" ></text>
+</g>
+<g >
+<title>sys_newfstat (1 samples, 0.25%)</title><rect x="1960.3" y="797" width="4.9" height="19.0" fill="rgb(238,226,14)" rx="2" ry="2" />
+<text  x="1963.30" y="809.5" ></text>
+</g>
+<g >
+<title>x86_pmu_enable (4 samples, 1.00%)</title><rect x="1965.2" y="717" width="19.9" height="19.0" fill="rgb(239,59,5)" rx="2" ry="2" />
+<text  x="1968.25" y="729.5" ></text>
+</g>
+<g >
+<title>sched_clock (1 samples, 0.25%)</title><rect x="1123.8" y="637" width="4.9" height="19.0" fill="rgb(225,115,22)" rx="2" ry="2" />
+<text  x="1126.75" y="649.5" ></text>
+</g>
+<g >
+<title>generic_perform_write (134 samples, 33.50%)</title><rect x="1212.9" y="637" width="663.3" height="19.0" fill="rgb(241,111,16)" rx="2" ry="2" />
+<text  x="1215.85" y="649.5" >generic_perform_write</text>
+</g>
+<g >
+<title>trace_graph_entry (3 samples, 0.75%)</title><rect x="183.2" y="577" width="14.9" height="19.0" fill="rgb(216,15,35)" rx="2" ry="2" />
+<text  x="186.25" y="589.5" ></text>
+</g>
+<g >
+<title>security_file_permission (7 samples, 1.75%)</title><rect x="1920.7" y="697" width="34.7" height="19.0" fill="rgb(246,120,40)" rx="2" ry="2" />
+<text  x="1923.70" y="709.5" >se..</text>
+</g>
+<g >
+<title>unlock_page_memcg (2 samples, 0.50%)</title><rect x="34.8" y="457" width="9.8" height="19.0" fill="rgb(233,14,22)" rx="2" ry="2" />
+<text  x="37.75" y="469.5" ></text>
+</g>
+<g >
+<title>ftrace_graph_caller (1 samples, 0.25%)</title><rect x="1495.0" y="517" width="5.0" height="19.0" fill="rgb(231,153,3)" rx="2" ry="2" />
+<text  x="1498.00" y="529.5" ></text>
+</g>
+<g >
+<title>trace_graph_entry (1 samples, 0.25%)</title><rect x="1252.5" y="497" width="4.9" height="19.0" fill="rgb(239,201,52)" rx="2" ry="2" />
+<text  x="1255.45" y="509.5" ></text>
+</g>
+<g >
+<title>prepare_ftrace_return (3 samples, 0.75%)</title><rect x="1732.6" y="417" width="14.9" height="19.0" fill="rgb(240,182,51)" rx="2" ry="2" />
+<text  x="1735.60" y="429.5" ></text>
+</g>
+<g >
+<title>ftrace_graph_caller (1 samples, 0.25%)</title><rect x="1336.6" y="577" width="4.9" height="19.0" fill="rgb(250,194,52)" rx="2" ry="2" />
+<text  x="1339.60" y="589.5" ></text>
+</g>
+<g >
+<title>native_sched_clock (1 samples, 0.25%)</title><rect x="1831.6" y="437" width="4.9" height="19.0" fill="rgb(245,150,4)" rx="2" ry="2" />
+<text  x="1834.60" y="449.5" ></text>
+</g>
+<g >
+<title>prepare_ftrace_return (1 samples, 0.25%)</title><rect x="1475.2" y="477" width="5.0" height="19.0" fill="rgb(217,16,5)" rx="2" ry="2" />
+<text  x="1478.20" y="489.5" ></text>
+</g>
+<g >
+<title>trace_clock_local (2 samples, 0.50%)</title><rect x="1222.8" y="537" width="9.9" height="19.0" fill="rgb(214,60,33)" rx="2" ry="2" />
+<text  x="1225.75" y="549.5" ></text>
+</g>
+<g >
+<title>balance_dirty_pages_ratelimited (2 samples, 0.50%)</title><rect x="1237.6" y="617" width="9.9" height="19.0" fill="rgb(251,8,24)" rx="2" ry="2" />
+<text  x="1240.60" y="629.5" ></text>
+</g>
+<g >
+<title>trace_graph_entry (2 samples, 0.50%)</title><rect x="604.0" y="557" width="9.9" height="19.0" fill="rgb(250,198,51)" rx="2" ry="2" />
+<text  x="607.00" y="569.5" ></text>
+</g>
+<g >
+<title>prepare_ftrace_return (1 samples, 0.25%)</title><rect x="1361.4" y="477" width="4.9" height="19.0" fill="rgb(233,59,49)" rx="2" ry="2" />
+<text  x="1364.35" y="489.5" ></text>
+</g>
+<g >
+<title>trace_clock_local (1 samples, 0.25%)</title><rect x="1707.9" y="377" width="4.9" height="19.0" fill="rgb(244,33,17)" rx="2" ry="2" />
+<text  x="1710.85" y="389.5" ></text>
+</g>
+<g >
+<title>function_graph_enter (1 samples, 0.25%)</title><rect x="282.2" y="577" width="5.0" height="19.0" fill="rgb(211,100,18)" rx="2" ry="2" />
+<text  x="285.25" y="589.5" ></text>
+</g>
+<g >
+<title>_dl_get_file_id (1 samples, 0.25%)</title><rect x="1960.3" y="877" width="4.9" height="19.0" fill="rgb(229,47,46)" rx="2" ry="2" />
+<text  x="1963.30" y="889.5" ></text>
+</g>
+<g >
+<title>trace_graph_entry (2 samples, 0.50%)</title><rect x="1633.6" y="337" width="9.9" height="19.0" fill="rgb(210,189,17)" rx="2" ry="2" />
+<text  x="1636.60" y="349.5" ></text>
+</g>
+<g >
+<title>blk_mq_end_request (1 samples, 0.25%)</title><rect x="39.7" y="117" width="4.9" height="19.0" fill="rgb(216,53,17)" rx="2" ry="2" />
+<text  x="42.70" y="129.5" ></text>
+</g>
+<g >
+<title>trace_graph_entry (1 samples, 0.25%)</title><rect x="1396.0" y="477" width="5.0" height="19.0" fill="rgb(225,38,43)" rx="2" ry="2" />
+<text  x="1399.00" y="489.5" ></text>
+</g>
+<g >
+<title>function_graph_enter (1 samples, 0.25%)</title><rect x="1391.0" y="417" width="5.0" height="19.0" fill="rgb(220,21,11)" rx="2" ry="2" />
+<text  x="1394.05" y="429.5" ></text>
+</g>
+<g >
+<title>ftrace_graph_caller (1 samples, 0.25%)</title><rect x="1460.4" y="577" width="4.9" height="19.0" fill="rgb(239,72,4)" rx="2" ry="2" />
+<text  x="1463.35" y="589.5" ></text>
+</g>
+<g >
+<title>prepare_ftrace_return (1 samples, 0.25%)</title><rect x="1603.9" y="417" width="5.0" height="19.0" fill="rgb(228,148,34)" rx="2" ry="2" />
+<text  x="1606.90" y="429.5" ></text>
+</g>
+<g >
+<title>ftrace_graph_caller (1 samples, 0.25%)</title><rect x="1549.5" y="517" width="4.9" height="19.0" fill="rgb(240,204,9)" rx="2" ry="2" />
+<text  x="1552.45" y="529.5" ></text>
+</g>
+<g >
+<title>__add_to_page_cache_locked (4 samples, 1.00%)</title><rect x="1415.8" y="537" width="19.8" height="19.0" fill="rgb(220,97,11)" rx="2" ry="2" />
+<text  x="1418.80" y="549.5" ></text>
+</g>
+<g >
+<title>__ext4_journal_stop (1 samples, 0.25%)</title><rect x="1549.5" y="537" width="4.9" height="19.0" fill="rgb(217,59,22)" rx="2" ry="2" />
+<text  x="1552.45" y="549.5" ></text>
+</g>
+<g >
+<title>file_update_time (7 samples, 1.75%)</title><rect x="1163.4" y="637" width="34.6" height="19.0" fill="rgb(224,104,15)" rx="2" ry="2" />
+<text  x="1166.35" y="649.5" >fi..</text>
+</g>
+<g >
+<title>ftrace_graph_caller (1 samples, 0.25%)</title><rect x="1356.4" y="477" width="5.0" height="19.0" fill="rgb(207,109,31)" rx="2" ry="2" />
+<text  x="1359.40" y="489.5" ></text>
+</g>
+<g >
+<title>native_sched_clock (2 samples, 0.50%)</title><rect x="1005.0" y="557" width="9.9" height="19.0" fill="rgb(207,3,7)" rx="2" ry="2" />
+<text  x="1007.95" y="569.5" ></text>
+</g>
+<g >
+<title>prepare_ftrace_return (1 samples, 0.25%)</title><rect x="19.9" y="437" width="5.0" height="19.0" fill="rgb(235,116,4)" rx="2" ry="2" />
+<text  x="22.90" y="449.5" ></text>
+</g>
+<g >
+<title>trace_clock_local (1 samples, 0.25%)</title><rect x="242.7" y="617" width="4.9" height="19.0" fill="rgb(222,89,38)" rx="2" ry="2" />
+<text  x="245.65" y="629.5" ></text>
+</g>
+<g >
+<title>ftrace_graph_caller (1 samples, 0.25%)</title><rect x="1772.2" y="457" width="5.0" height="19.0" fill="rgb(216,183,50)" rx="2" ry="2" />
+<text  x="1775.20" y="469.5" ></text>
+</g>
+<g >
+<title>do_syscall_64 (1 samples, 0.25%)</title><rect x="1960.3" y="817" width="4.9" height="19.0" fill="rgb(205,95,45)" rx="2" ry="2" />
+<text  x="1963.30" y="829.5" ></text>
+</g>
+<g >
+<title>__sb_end_write (1 samples, 0.25%)</title><rect x="1133.7" y="717" width="4.9" height="19.0" fill="rgb(207,37,15)" rx="2" ry="2" />
+<text  x="1136.65" y="729.5" ></text>
+</g>
+<g >
+<title>ftrace_graph_caller (1 samples, 0.25%)</title><rect x="1900.9" y="697" width="5.0" height="19.0" fill="rgb(205,37,46)" rx="2" ry="2" />
+<text  x="1903.90" y="709.5" ></text>
+</g>
+<g >
+<title>prepare_ftrace_return (1 samples, 0.25%)</title><rect x="1683.1" y="437" width="4.9" height="19.0" fill="rgb(229,51,33)" rx="2" ry="2" />
+<text  x="1686.10" y="449.5" ></text>
+</g>
+<g >
+<title>wait_for_stable_page (2 samples, 0.50%)</title><rect x="1445.5" y="577" width="9.9" height="19.0" fill="rgb(252,109,25)" rx="2" ry="2" />
+<text  x="1448.50" y="589.5" ></text>
+</g>
+<g >
+<title>function_graph_enter (1 samples, 0.25%)</title><rect x="1168.3" y="557" width="4.9" height="19.0" fill="rgb(211,125,2)" rx="2" ry="2" />
+<text  x="1171.30" y="569.5" ></text>
+</g>
+<g >
+<title>ftrace_graph_caller (2 samples, 0.50%)</title><rect x="1039.6" y="697" width="9.9" height="19.0" fill="rgb(214,53,34)" rx="2" ry="2" />
+<text  x="1042.60" y="709.5" ></text>
+</g>
+<g >
+<title>sched_clock (1 samples, 0.25%)</title><rect x="1371.2" y="477" width="5.0" height="19.0" fill="rgb(228,45,15)" rx="2" ry="2" />
+<text  x="1374.25" y="489.5" ></text>
+</g>
+<g >
+<title>trace_graph_entry (1 samples, 0.25%)</title><rect x="1717.8" y="397" width="4.9" height="19.0" fill="rgb(224,191,47)" rx="2" ry="2" />
+<text  x="1720.75" y="409.5" ></text>
+</g>
+<g >
+<title>ftrace_graph_caller (1 samples, 0.25%)</title><rect x="1401.0" y="497" width="4.9" height="19.0" fill="rgb(219,16,34)" rx="2" ry="2" />
+<text  x="1403.95" y="509.5" ></text>
+</g>
+<g >
+<title>vfs_write (166 samples, 41.50%)</title><rect x="1133.7" y="737" width="821.7" height="19.0" fill="rgb(250,217,1)" rx="2" ry="2" />
+<text  x="1136.65" y="749.5" >vfs_write</text>
+</g>
+<g >
+<title>prepare_ftrace_return (1 samples, 0.25%)</title><rect x="1282.2" y="517" width="4.9" height="19.0" fill="rgb(209,141,30)" rx="2" ry="2" />
+<text  x="1285.15" y="529.5" ></text>
+</g>
+<g >
+<title>function_graph_enter (1 samples, 0.25%)</title><rect x="1514.8" y="517" width="5.0" height="19.0" fill="rgb(248,163,13)" rx="2" ry="2" />
+<text  x="1517.80" y="529.5" ></text>
+</g>
+<g >
+<title>function_graph_enter (1 samples, 0.25%)</title><rect x="1846.5" y="517" width="4.9" height="19.0" fill="rgb(251,13,0)" rx="2" ry="2" />
+<text  x="1849.45" y="529.5" ></text>
+</g>
+<g >
+<title>ftrace_graph_caller (1 samples, 0.25%)</title><rect x="1504.9" y="537" width="5.0" height="19.0" fill="rgb(207,7,45)" rx="2" ry="2" />
+<text  x="1507.90" y="549.5" ></text>
+</g>
+<g >
+<title>ftrace_graph_caller (2 samples, 0.50%)</title><rect x="1702.9" y="437" width="9.9" height="19.0" fill="rgb(253,107,12)" rx="2" ry="2" />
+<text  x="1705.90" y="449.5" ></text>
+</g>
+<g >
+<title>ext4_end_bio (1 samples, 0.25%)</title><rect x="39.7" y="57" width="4.9" height="19.0" fill="rgb(235,69,26)" rx="2" ry="2" />
+<text  x="42.70" y="69.5" ></text>
+</g>
+<g >
+<title>_raw_spin_unlock_irqrestore (1 samples, 0.25%)</title><rect x="1500.0" y="537" width="4.9" height="19.0" fill="rgb(220,4,15)" rx="2" ry="2" />
+<text  x="1502.95" y="549.5" ></text>
+</g>
+<g >
+<title>function_graph_enter (1 samples, 0.25%)</title><rect x="1282.2" y="497" width="4.9" height="19.0" fill="rgb(225,47,12)" rx="2" ry="2" />
+<text  x="1285.15" y="509.5" ></text>
+</g>
+<g >
+<title>function_graph_enter (1 samples, 0.25%)</title><rect x="1247.5" y="477" width="5.0" height="19.0" fill="rgb(251,121,50)" rx="2" ry="2" />
+<text  x="1250.50" y="489.5" ></text>
+</g>
+<g >
+<title>sched_clock (1 samples, 0.25%)</title><rect x="1707.9" y="357" width="4.9" height="19.0" fill="rgb(212,44,12)" rx="2" ry="2" />
+<text  x="1710.85" y="369.5" ></text>
+</g>
+<g >
+<title>jbd2_journal_get_write_access (4 samples, 1.00%)</title><rect x="1782.1" y="477" width="19.8" height="19.0" fill="rgb(254,109,41)" rx="2" ry="2" />
+<text  x="1785.10" y="489.5" ></text>
+</g>
+<g >
+<title>ftrace_graph_caller (1 samples, 0.25%)</title><rect x="10.0" y="457" width="4.9" height="19.0" fill="rgb(205,217,2)" rx="2" ry="2" />
+<text  x="13.00" y="469.5" ></text>
+</g>
+<g >
+<title>clear_page_dirty_for_io (4 samples, 1.00%)</title><rect x="10.0" y="497" width="19.8" height="19.0" fill="rgb(238,0,44)" rx="2" ry="2" />
+<text  x="13.00" y="509.5" ></text>
+</g>
+<g >
+<title>ftrace_graph_caller (4 samples, 1.00%)</title><rect x="1623.7" y="397" width="19.8" height="19.0" fill="rgb(246,190,14)" rx="2" ry="2" />
+<text  x="1626.70" y="409.5" ></text>
+</g>
+<g >
+<title>trace_graph_entry (1 samples, 0.25%)</title><rect x="346.6" y="557" width="5.0" height="19.0" fill="rgb(234,56,22)" rx="2" ry="2" />
+<text  x="349.60" y="569.5" ></text>
+</g>
+<g >
+<title>__slab_alloc (1 samples, 0.25%)</title><rect x="1351.5" y="497" width="4.9" height="19.0" fill="rgb(220,3,20)" rx="2" ry="2" />
+<text  x="1354.45" y="509.5" ></text>
+</g>
+<g >
+<title>function_graph_enter (1 samples, 0.25%)</title><rect x="104.0" y="697" width="5.0" height="19.0" fill="rgb(222,35,37)" rx="2" ry="2" />
+<text  x="107.05" y="709.5" ></text>
+</g>
+<g >
+<title>prepare_ftrace_return (1 samples, 0.25%)</title><rect x="1396.0" y="497" width="5.0" height="19.0" fill="rgb(248,93,41)" rx="2" ry="2" />
+<text  x="1399.00" y="509.5" ></text>
+</g>
+<g >
+<title>prepare_ftrace_return (2 samples, 0.50%)</title><rect x="1039.6" y="677" width="9.9" height="19.0" fill="rgb(216,9,25)" rx="2" ry="2" />
+<text  x="1042.60" y="689.5" ></text>
+</g>
+<g >
+<title>entry_SYSCALL_64_after_hwframe (1 samples, 0.25%)</title><rect x="49.6" y="777" width="5.0" height="19.0" fill="rgb(221,91,54)" rx="2" ry="2" />
+<text  x="52.60" y="789.5" ></text>
+</g>
+<g >
+<title>__fsnotify_parent (4 samples, 1.00%)</title><rect x="114.0" y="717" width="19.8" height="19.0" fill="rgb(224,46,24)" rx="2" ry="2" />
+<text  x="116.95" y="729.5" ></text>
+</g>
+<g >
+<title>rcu_all_qs (1 samples, 0.25%)</title><rect x="1138.6" y="677" width="4.9" height="19.0" fill="rgb(236,4,13)" rx="2" ry="2" />
+<text  x="1141.60" y="689.5" ></text>
+</g>
+<g >
+<title>trace_graph_entry (1 samples, 0.25%)</title><rect x="1287.1" y="457" width="4.9" height="19.0" fill="rgb(249,194,49)" rx="2" ry="2" />
+<text  x="1290.10" y="469.5" ></text>
+</g>
+<g >
+<title>trace_graph_entry (1 samples, 0.25%)</title><rect x="237.7" y="597" width="5.0" height="19.0" fill="rgb(206,195,9)" rx="2" ry="2" />
+<text  x="240.70" y="609.5" ></text>
+</g>
+<g >
+<title>trace_clock_local (2 samples, 0.50%)</title><rect x="1005.0" y="597" width="9.9" height="19.0" fill="rgb(243,2,50)" rx="2" ry="2" />
+<text  x="1007.95" y="609.5" ></text>
+</g>
+<g >
+<title>native_sched_clock (2 samples, 0.50%)</title><rect x="1757.4" y="357" width="9.8" height="19.0" fill="rgb(235,103,18)" rx="2" ry="2" />
+<text  x="1760.35" y="369.5" ></text>
+</g>
+<g >
+<title>function_graph_enter (1 samples, 0.25%)</title><rect x="1128.7" y="697" width="5.0" height="19.0" fill="rgb(222,129,3)" rx="2" ry="2" />
+<text  x="1131.70" y="709.5" ></text>
+</g>
+<g >
+<title>ftrace_graph_caller (1 samples, 0.25%)</title><rect x="1277.2" y="497" width="5.0" height="19.0" fill="rgb(239,20,16)" rx="2" ry="2" />
+<text  x="1280.20" y="509.5" ></text>
+</g>
+<g >
+<title>function_graph_enter (1 samples, 0.25%)</title><rect x="1886.0" y="617" width="5.0" height="19.0" fill="rgb(253,111,4)" rx="2" ry="2" />
+<text  x="1889.05" y="629.5" ></text>
+</g>
+<g >
+<title>native_sched_clock (1 samples, 0.25%)</title><rect x="232.8" y="557" width="4.9" height="19.0" fill="rgb(205,205,20)" rx="2" ry="2" />
+<text  x="235.75" y="569.5" ></text>
+</g>
+<g >
+<title>trace_graph_entry (1 samples, 0.25%)</title><rect x="1683.1" y="397" width="4.9" height="19.0" fill="rgb(242,77,8)" rx="2" ry="2" />
+<text  x="1686.10" y="409.5" ></text>
+</g>
+<g >
+<title>__alloc_pages_nodemask (2 samples, 0.50%)</title><rect x="1386.1" y="517" width="9.9" height="19.0" fill="rgb(235,117,3)" rx="2" ry="2" />
+<text  x="1389.10" y="529.5" ></text>
+</g>
+<g >
+<title>ftrace_graph_caller (1 samples, 0.25%)</title><rect x="118.9" y="677" width="5.0" height="19.0" fill="rgb(223,170,2)" rx="2" ry="2" />
+<text  x="121.90" y="689.5" ></text>
+</g>
+<g >
+<title>sched_clock (1 samples, 0.25%)</title><rect x="1420.8" y="437" width="4.9" height="19.0" fill="rgb(216,57,5)" rx="2" ry="2" />
+<text  x="1423.75" y="449.5" ></text>
+</g>
+<g >
+<title>from_kuid (2 samples, 0.50%)</title><rect x="1712.8" y="477" width="9.9" height="19.0" fill="rgb(219,20,45)" rx="2" ry="2" />
+<text  x="1715.80" y="489.5" ></text>
+</g>
+<g >
+<title>trace_graph_entry (1 samples, 0.25%)</title><rect x="1311.9" y="477" width="4.9" height="19.0" fill="rgb(232,22,28)" rx="2" ry="2" />
+<text  x="1314.85" y="489.5" ></text>
+</g>
+<g >
+<title>prepare_ftrace_return (1 samples, 0.25%)</title><rect x="1935.6" y="597" width="4.9" height="19.0" fill="rgb(254,229,37)" rx="2" ry="2" />
+<text  x="1938.55" y="609.5" ></text>
+</g>
+<g >
+<title>add_to_page_cache_lru (4 samples, 1.00%)</title><rect x="1415.8" y="557" width="19.8" height="19.0" fill="rgb(233,47,39)" rx="2" ry="2" />
+<text  x="1418.80" y="569.5" ></text>
+</g>
+<g >
+<title>ftrace_lookup_ip (1 samples, 0.25%)</title><rect x="173.3" y="577" width="5.0" height="19.0" fill="rgb(248,72,50)" rx="2" ry="2" />
+<text  x="176.35" y="589.5" ></text>
+</g>
+<g >
+<title>kmem_cache_alloc (2 samples, 0.50%)</title><rect x="1351.5" y="517" width="9.9" height="19.0" fill="rgb(246,218,5)" rx="2" ry="2" />
+<text  x="1354.45" y="529.5" ></text>
+</g>
+<g >
+<title>prepare_ftrace_return (1 samples, 0.25%)</title><rect x="1064.4" y="617" width="4.9" height="19.0" fill="rgb(234,77,18)" rx="2" ry="2" />
+<text  x="1067.35" y="629.5" ></text>
+</g>
+<g >
+<title>trace_graph_entry (1 samples, 0.25%)</title><rect x="1336.6" y="517" width="4.9" height="19.0" fill="rgb(232,66,32)" rx="2" ry="2" />
+<text  x="1339.60" y="529.5" ></text>
+</g>
+<g >
+<title>[dd] (9 samples, 2.25%)</title><rect x="10.0" y="817" width="44.6" height="19.0" fill="rgb(215,122,26)" rx="2" ry="2" />
+<text  x="13.00" y="829.5" >[dd]</text>
+</g>
+<g >
+<title>ftrace_graph_caller (1 samples, 0.25%)</title><rect x="19.9" y="457" width="5.0" height="19.0" fill="rgb(218,167,2)" rx="2" ry="2" />
+<text  x="22.90" y="469.5" ></text>
+</g>
+<g >
+<title>_cond_resched (5 samples, 1.25%)</title><rect x="1212.9" y="617" width="24.7" height="19.0" fill="rgb(246,130,1)" rx="2" ry="2" />
+<text  x="1215.85" y="629.5" >_..</text>
+</g>
+<g >
+<title>trace_graph_entry (1 samples, 0.25%)</title><rect x="14.9" y="417" width="5.0" height="19.0" fill="rgb(241,78,32)" rx="2" ry="2" />
+<text  x="17.95" y="429.5" ></text>
+</g>
+<g >
+<title>function_graph_enter (1 samples, 0.25%)</title><rect x="1900.9" y="657" width="5.0" height="19.0" fill="rgb(245,100,40)" rx="2" ry="2" />
+<text  x="1903.90" y="669.5" ></text>
+</g>
+<g >
+<title>entry_SYSCALL_64_after_hwframe (1 samples, 0.25%)</title><rect x="1960.3" y="837" width="4.9" height="19.0" fill="rgb(220,59,44)" rx="2" ry="2" />
+<text  x="1963.30" y="849.5" ></text>
+</g>
+<g >
+<title>ftrace_graph_caller (1 samples, 0.25%)</title><rect x="1599.0" y="457" width="4.9" height="19.0" fill="rgb(228,46,12)" rx="2" ry="2" />
+<text  x="1601.95" y="469.5" ></text>
+</g>
+<g >
+<title>add_transaction_credits (3 samples, 0.75%)</title><rect x="1316.8" y="537" width="14.9" height="19.0" fill="rgb(253,225,25)" rx="2" ry="2" />
+<text  x="1319.80" y="549.5" ></text>
+</g>
+<g >
+<title>prepare_ftrace_return (2 samples, 0.50%)</title><rect x="123.9" y="677" width="9.9" height="19.0" fill="rgb(237,25,44)" rx="2" ry="2" />
+<text  x="126.85" y="689.5" ></text>
+</g>
+<g >
+<title>native_sched_clock (1 samples, 0.25%)</title><rect x="1945.5" y="557" width="4.9" height="19.0" fill="rgb(254,124,8)" rx="2" ry="2" />
+<text  x="1948.45" y="569.5" ></text>
+</g>
+<g >
+<title>ftrace_graph_caller (1 samples, 0.25%)</title><rect x="1831.6" y="537" width="4.9" height="19.0" fill="rgb(220,16,14)" rx="2" ry="2" />
+<text  x="1834.60" y="549.5" ></text>
+</g>
+<g >
+<title>ext4_bio_write_page (4 samples, 1.00%)</title><rect x="29.8" y="497" width="19.8" height="19.0" fill="rgb(233,149,3)" rx="2" ry="2" />
+<text  x="32.80" y="509.5" ></text>
+</g>
+<g >
+<title>function_graph_enter (1 samples, 0.25%)</title><rect x="1475.2" y="457" width="5.0" height="19.0" fill="rgb(222,81,43)" rx="2" ry="2" />
+<text  x="1478.20" y="469.5" ></text>
+</g>
+<g >
+<title>function_graph_enter (1 samples, 0.25%)</title><rect x="1287.1" y="477" width="4.9" height="19.0" fill="rgb(218,154,3)" rx="2" ry="2" />
+<text  x="1290.10" y="489.5" ></text>
+</g>
+<g >
+<title>prepare_ftrace_return (1 samples, 0.25%)</title><rect x="1143.5" y="677" width="5.0" height="19.0" fill="rgb(252,44,7)" rx="2" ry="2" />
+<text  x="1146.55" y="689.5" ></text>
+</g>
+<g >
+<title>prepare_ftrace_return (1 samples, 0.25%)</title><rect x="1247.5" y="497" width="5.0" height="19.0" fill="rgb(229,97,30)" rx="2" ry="2" />
+<text  x="1250.50" y="509.5" ></text>
+</g>
+<g >
+<title>prepare_ftrace_return (4 samples, 1.00%)</title><rect x="1747.5" y="437" width="19.7" height="19.0" fill="rgb(205,102,3)" rx="2" ry="2" />
+<text  x="1750.45" y="449.5" ></text>
+</g>
+<g >
+<title>sched_clock (1 samples, 0.25%)</title><rect x="232.8" y="577" width="4.9" height="19.0" fill="rgb(228,103,28)" rx="2" ry="2" />
+<text  x="235.75" y="589.5" ></text>
+</g>
+<g >
+<title>ext4_es_can_be_merged (1 samples, 0.25%)</title><rect x="1361.4" y="517" width="4.9" height="19.0" fill="rgb(238,216,34)" rx="2" ry="2" />
+<text  x="1364.35" y="529.5" ></text>
+</g>
+<g >
+<title>_cond_resched (2 samples, 0.50%)</title><rect x="1772.2" y="477" width="9.9" height="19.0" fill="rgb(245,129,32)" rx="2" ry="2" />
+<text  x="1775.20" y="489.5" ></text>
+</g>
+<g >
+<title>dput.part.26 (2 samples, 0.50%)</title><rect x="1069.3" y="637" width="9.9" height="19.0" fill="rgb(252,137,9)" rx="2" ry="2" />
+<text  x="1072.30" y="649.5" ></text>
+</g>
+<g >
+<title>ctx_resched (4 samples, 1.00%)</title><rect x="1965.2" y="737" width="19.9" height="19.0" fill="rgb(216,179,1)" rx="2" ry="2" />
+<text  x="1968.25" y="749.5" ></text>
+</g>
+<g >
+<title>prepare_ftrace_return (1 samples, 0.25%)</title><rect x="1831.6" y="517" width="4.9" height="19.0" fill="rgb(234,89,44)" rx="2" ry="2" />
+<text  x="1834.60" y="529.5" ></text>
+</g>
+<g >
+<title>function_graph_enter (2 samples, 0.50%)</title><rect x="1445.5" y="517" width="9.9" height="19.0" fill="rgb(208,219,23)" rx="2" ry="2" />
+<text  x="1448.50" y="529.5" ></text>
+</g>
+<g >
+<title>native_sched_clock (1 samples, 0.25%)</title><rect x="1707.9" y="337" width="4.9" height="19.0" fill="rgb(208,51,16)" rx="2" ry="2" />
+<text  x="1710.85" y="349.5" ></text>
+</g>
+<g >
+<title>__libc_open64 (1 samples, 0.25%)</title><rect x="49.6" y="797" width="5.0" height="19.0" fill="rgb(220,116,22)" rx="2" ry="2" />
+<text  x="52.60" y="809.5" ></text>
+</g>
+<g >
+<title>setup_new_exec (5 samples, 1.25%)</title><rect x="1965.2" y="777" width="24.8" height="19.0" fill="rgb(222,196,28)" rx="2" ry="2" />
+<text  x="1968.25" y="789.5" >s..</text>
+</g>
+<g >
+<title>_raw_spin_unlock_irqrestore (14 samples, 3.50%)</title><rect x="613.9" y="637" width="69.3" height="19.0" fill="rgb(236,10,32)" rx="2" ry="2" />
+<text  x="616.90" y="649.5" >_raw_sp..</text>
+</g>
+<g >
+<title>prepare_ftrace_return (1 samples, 0.25%)</title><rect x="84.2" y="737" width="5.0" height="19.0" fill="rgb(209,187,8)" rx="2" ry="2" />
+<text  x="87.25" y="749.5" ></text>
+</g>
+<g >
+<title>prepare_ftrace_return (1 samples, 0.25%)</title><rect x="1232.7" y="557" width="4.9" height="19.0" fill="rgb(240,147,1)" rx="2" ry="2" />
+<text  x="1235.65" y="569.5" ></text>
+</g>
+<g >
+<title>ftrace_graph_caller (2 samples, 0.50%)</title><rect x="123.9" y="697" width="9.9" height="19.0" fill="rgb(208,163,12)" rx="2" ry="2" />
+<text  x="126.85" y="709.5" ></text>
+</g>
+<g >
+<title>ftrace_graph_caller (1 samples, 0.25%)</title><rect x="1698.0" y="457" width="4.9" height="19.0" fill="rgb(213,191,12)" rx="2" ry="2" />
+<text  x="1700.95" y="469.5" ></text>
+</g>
+<g >
+<title>_cond_resched (1 samples, 0.25%)</title><rect x="1277.2" y="537" width="5.0" height="19.0" fill="rgb(245,101,19)" rx="2" ry="2" />
+<text  x="1280.20" y="549.5" ></text>
+</g>
+<g >
+<title>map_id_up (2 samples, 0.50%)</title><rect x="1702.9" y="457" width="9.9" height="19.0" fill="rgb(205,74,47)" rx="2" ry="2" />
+<text  x="1705.90" y="469.5" ></text>
+</g>
+<g >
+<title>trace_graph_entry (1 samples, 0.25%)</title><rect x="1900.9" y="637" width="5.0" height="19.0" fill="rgb(223,208,41)" rx="2" ry="2" />
+<text  x="1903.90" y="649.5" ></text>
+</g>
+<g >
+<title>__indirect_thunk_start (1 samples, 0.25%)</title><rect x="1277.2" y="457" width="5.0" height="19.0" fill="rgb(233,209,8)" rx="2" ry="2" />
+<text  x="1280.20" y="469.5" ></text>
+</g>
+<g >
+<title>trace_graph_entry (1 samples, 0.25%)</title><rect x="965.4" y="597" width="4.9" height="19.0" fill="rgb(238,96,46)" rx="2" ry="2" />
+<text  x="968.35" y="609.5" ></text>
+</g>
+<g >
+<title>prepare_ftrace_return (1 samples, 0.25%)</title><rect x="14.9" y="457" width="5.0" height="19.0" fill="rgb(215,217,25)" rx="2" ry="2" />
+<text  x="17.95" y="469.5" ></text>
+</g>
+<g >
+<title>ftrace_graph_caller (2 samples, 0.50%)</title><rect x="1940.5" y="657" width="9.9" height="19.0" fill="rgb(219,167,30)" rx="2" ry="2" />
+<text  x="1943.50" y="669.5" ></text>
+</g>
+<g >
+<title>ftrace_graph_caller (1 samples, 0.25%)</title><rect x="84.2" y="757" width="5.0" height="19.0" fill="rgb(235,174,5)" rx="2" ry="2" />
+<text  x="87.25" y="769.5" ></text>
+</g>
+<g >
+<title>prepare_ftrace_return (1 samples, 0.25%)</title><rect x="1871.2" y="597" width="5.0" height="19.0" fill="rgb(247,111,14)" rx="2" ry="2" />
+<text  x="1874.20" y="609.5" ></text>
+</g>
+<g >
+<title>prepare_ftrace_return (1 samples, 0.25%)</title><rect x="1326.7" y="517" width="5.0" height="19.0" fill="rgb(218,204,52)" rx="2" ry="2" />
+<text  x="1329.70" y="529.5" ></text>
+</g>
+<g >
+<title>ftrace_graph_caller (1 samples, 0.25%)</title><rect x="1554.4" y="497" width="5.0" height="19.0" fill="rgb(226,134,36)" rx="2" ry="2" />
+<text  x="1557.40" y="509.5" ></text>
+</g>
+<g >
+<title>notify_change (1 samples, 0.25%)</title><rect x="49.6" y="637" width="5.0" height="19.0" fill="rgb(234,41,4)" rx="2" ry="2" />
+<text  x="52.60" y="649.5" ></text>
+</g>
+<g >
+<title>function_graph_enter (1 samples, 0.25%)</title><rect x="1935.6" y="577" width="4.9" height="19.0" fill="rgb(232,82,34)" rx="2" ry="2" />
+<text  x="1938.55" y="589.5" ></text>
+</g>
+<g >
+<title>__find_get_block (1 samples, 0.25%)</title><rect x="1727.7" y="457" width="4.9" height="19.0" fill="rgb(254,130,16)" rx="2" ry="2" />
+<text  x="1730.65" y="469.5" ></text>
+</g>
+<g >
+<title>function_graph_enter (1 samples, 0.25%)</title><rect x="1742.5" y="397" width="5.0" height="19.0" fill="rgb(254,50,37)" rx="2" ry="2" />
+<text  x="1745.50" y="409.5" ></text>
+</g>
+<g >
+<title>ext4_writepages (8 samples, 2.00%)</title><rect x="10.0" y="557" width="39.6" height="19.0" fill="rgb(238,9,33)" rx="2" ry="2" />
+<text  x="13.00" y="569.5" >ext..</text>
+</g>
+<g >
+<title>crypto_shash_update (11 samples, 2.75%)</title><rect x="1623.7" y="437" width="54.5" height="19.0" fill="rgb(236,181,7)" rx="2" ry="2" />
+<text  x="1626.70" y="449.5" >crypt..</text>
+</g>
+<g >
+<title>function_graph_enter (1 samples, 0.25%)</title><rect x="1321.8" y="477" width="4.9" height="19.0" fill="rgb(221,154,12)" rx="2" ry="2" />
+<text  x="1324.75" y="489.5" ></text>
+</g>
+<g >
+<title>function_graph_enter (6 samples, 1.50%)</title><rect x="643.6" y="577" width="29.7" height="19.0" fill="rgb(206,168,21)" rx="2" ry="2" />
+<text  x="646.60" y="589.5" >fu..</text>
+</g>
+<g >
+<title>trace_graph_entry (1 samples, 0.25%)</title><rect x="1054.5" y="657" width="4.9" height="19.0" fill="rgb(233,6,1)" rx="2" ry="2" />
+<text  x="1057.45" y="669.5" ></text>
+</g>
+<g >
+<title>jbd2_journal_stop (11 samples, 2.75%)</title><rect x="1465.3" y="577" width="54.5" height="19.0" fill="rgb(236,91,47)" rx="2" ry="2" />
+<text  x="1468.30" y="589.5" >jbd2_..</text>
+</g>
+<g >
+<title>do_syscall_64 (207 samples, 51.75%)</title><rect x="69.4" y="777" width="1024.6" height="19.0" fill="rgb(239,106,17)" rx="2" ry="2" />
+<text  x="72.40" y="789.5" >do_syscall_64</text>
+</g>
+<g >
+<title>prepare_ftrace_return (1 samples, 0.25%)</title><rect x="1772.2" y="437" width="5.0" height="19.0" fill="rgb(240,179,51)" rx="2" ry="2" />
+<text  x="1775.20" y="449.5" ></text>
+</g>
+<g >
+<title>prepare_ftrace_return (4 samples, 1.00%)</title><rect x="1623.7" y="377" width="19.8" height="19.0" fill="rgb(226,19,37)" rx="2" ry="2" />
+<text  x="1626.70" y="389.5" ></text>
+</g>
+<g >
+<title>__getblk_gfp (8 samples, 2.00%)</title><rect x="1727.7" y="477" width="39.5" height="19.0" fill="rgb(250,222,44)" rx="2" ry="2" />
+<text  x="1730.65" y="489.5" >__g..</text>
+</g>
+<g >
+<title>ftrace_graph_caller (1 samples, 0.25%)</title><rect x="1252.5" y="557" width="4.9" height="19.0" fill="rgb(238,164,33)" rx="2" ry="2" />
+<text  x="1255.45" y="569.5" ></text>
+</g>
+<g >
+<title>__wake_up_common (1 samples, 0.25%)</title><rect x="1470.2" y="517" width="5.0" height="19.0" fill="rgb(236,108,12)" rx="2" ry="2" />
+<text  x="1473.25" y="529.5" ></text>
+</g>
+<g >
+<title>ftrace_graph_caller (3 samples, 0.75%)</title><rect x="1732.6" y="437" width="14.9" height="19.0" fill="rgb(249,221,14)" rx="2" ry="2" />
+<text  x="1735.60" y="449.5" ></text>
+</g>
+<g >
+<title>ext4_dirty_inode (1 samples, 0.25%)</title><rect x="1856.4" y="577" width="4.9" height="19.0" fill="rgb(250,65,2)" rx="2" ry="2" />
+<text  x="1859.35" y="589.5" ></text>
+</g>
+<g >
+<title>prepare_ftrace_return (1 samples, 0.25%)</title><rect x="1341.5" y="537" width="5.0" height="19.0" fill="rgb(238,200,49)" rx="2" ry="2" />
+<text  x="1344.55" y="549.5" ></text>
+</g>
+<g >
+<title>ftrace_graph_caller (1 samples, 0.25%)</title><rect x="1287.1" y="517" width="4.9" height="19.0" fill="rgb(212,180,30)" rx="2" ry="2" />
+<text  x="1290.10" y="529.5" ></text>
+</g>
+<g >
+<title>do_execveat_common.isra.34 (5 samples, 1.25%)</title><rect x="1965.2" y="837" width="24.8" height="19.0" fill="rgb(225,128,47)" rx="2" ry="2" />
+<text  x="1968.25" y="849.5" >d..</text>
+</g>
+<g >
+<title>intel_tfa_pmu_enable_all (4 samples, 1.00%)</title><rect x="1965.2" y="697" width="19.9" height="19.0" fill="rgb(221,23,32)" rx="2" ry="2" />
+<text  x="1968.25" y="709.5" ></text>
+</g>
+<g >
+<title>ftrace_lookup_ip (1 samples, 0.25%)</title><rect x="1282.2" y="457" width="4.9" height="19.0" fill="rgb(217,112,43)" rx="2" ry="2" />
+<text  x="1285.15" y="469.5" ></text>
+</g>
+<g >
+<title>prepare_ftrace_return (1 samples, 0.25%)</title><rect x="1519.8" y="577" width="4.9" height="19.0" fill="rgb(214,138,33)" rx="2" ry="2" />
+<text  x="1522.75" y="589.5" ></text>
+</g>
+<g >
+<title>function_graph_enter (7 samples, 1.75%)</title><rect x="208.0" y="617" width="34.7" height="19.0" fill="rgb(224,174,32)" rx="2" ry="2" />
+<text  x="211.00" y="629.5" >fu..</text>
+</g>
+<g >
+<title>trace_graph_entry (1 samples, 0.25%)</title><rect x="1678.2" y="397" width="4.9" height="19.0" fill="rgb(232,229,43)" rx="2" ry="2" />
+<text  x="1681.15" y="409.5" ></text>
+</g>
+<g >
+<title>native_sched_clock (1 samples, 0.25%)</title><rect x="123.9" y="597" width="4.9" height="19.0" fill="rgb(252,78,0)" rx="2" ry="2" />
+<text  x="126.85" y="609.5" ></text>
+</g>
+<g >
+<title>handle_irq (1 samples, 0.25%)</title><rect x="39.7" y="337" width="4.9" height="19.0" fill="rgb(214,99,17)" rx="2" ry="2" />
+<text  x="42.70" y="349.5" ></text>
+</g>
+<g >
+<title>entry_SYSCALL_64_after_hwframe (8 samples, 2.00%)</title><rect x="10.0" y="777" width="39.6" height="19.0" fill="rgb(224,176,8)" rx="2" ry="2" />
+<text  x="13.00" y="789.5" >ent..</text>
+</g>
+<g >
+<title>ftrace_graph_caller (1 samples, 0.25%)</title><rect x="1678.2" y="457" width="4.9" height="19.0" fill="rgb(233,81,47)" rx="2" ry="2" />
+<text  x="1681.15" y="469.5" ></text>
+</g>
+<g >
+<title>trace_clock_local (2 samples, 0.50%)</title><rect x="653.5" y="557" width="9.9" height="19.0" fill="rgb(253,226,21)" rx="2" ry="2" />
+<text  x="656.50" y="569.5" ></text>
+</g>
+<g >
+<title>entry_SYSCALL_64_after_hwframe (173 samples, 43.25%)</title><rect x="1099.0" y="797" width="856.4" height="19.0" fill="rgb(216,105,4)" rx="2" ry="2" />
+<text  x="1102.00" y="809.5" >entry_SYSCALL_64_after_hwframe</text>
+</g>
+<g >
+<title>filemap_flush (8 samples, 2.00%)</title><rect x="10.0" y="617" width="39.6" height="19.0" fill="rgb(225,15,19)" rx="2" ry="2" />
+<text  x="13.00" y="629.5" >fil..</text>
+</g>
+<g >
+<title>native_sched_clock (1 samples, 0.25%)</title><rect x="1440.5" y="457" width="5.0" height="19.0" fill="rgb(213,90,18)" rx="2" ry="2" />
+<text  x="1443.55" y="469.5" ></text>
+</g>
+<g >
+<title>function_graph_enter (3 samples, 0.75%)</title><rect x="1752.4" y="417" width="14.8" height="19.0" fill="rgb(230,27,36)" rx="2" ry="2" />
+<text  x="1755.40" y="429.5" ></text>
+</g>
+<g >
+<title>ftrace_graph_is_dead (1 samples, 0.25%)</title><rect x="1524.7" y="437" width="5.0" height="19.0" fill="rgb(253,52,21)" rx="2" ry="2" />
+<text  x="1527.70" y="449.5" ></text>
+</g>
+<g >
+<title>entry_SYSCALL_64_after_hwframe (5 samples, 1.25%)</title><rect x="1965.2" y="897" width="24.8" height="19.0" fill="rgb(218,198,10)" rx="2" ry="2" />
+<text  x="1968.25" y="909.5" >e..</text>
+</g>
+<g >
+<title>ftrace_graph_caller (1 samples, 0.25%)</title><rect x="1881.1" y="637" width="4.9" height="19.0" fill="rgb(221,180,50)" rx="2" ry="2" />
+<text  x="1884.10" y="649.5" ></text>
+</g>
+<g >
+<title>function_graph_enter (2 samples, 0.50%)</title><rect x="1118.8" y="677" width="9.9" height="19.0" fill="rgb(244,139,37)" rx="2" ry="2" />
+<text  x="1121.80" y="689.5" ></text>
+</g>
+<g >
+<title>function_graph_enter (1 samples, 0.25%)</title><rect x="1401.0" y="457" width="4.9" height="19.0" fill="rgb(213,83,35)" rx="2" ry="2" />
+<text  x="1403.95" y="469.5" ></text>
+</g>
+<g >
+<title>native_sched_clock (1 samples, 0.25%)</title><rect x="1371.2" y="457" width="5.0" height="19.0" fill="rgb(228,11,21)" rx="2" ry="2" />
+<text  x="1374.25" y="469.5" ></text>
+</g>
+<g >
+<title>prepare_ftrace_return (3 samples, 0.75%)</title><rect x="1217.8" y="577" width="14.9" height="19.0" fill="rgb(237,148,7)" rx="2" ry="2" />
+<text  x="1220.80" y="589.5" ></text>
+</g>
+<g >
+<title>function_graph_enter (1 samples, 0.25%)</title><rect x="1831.6" y="497" width="4.9" height="19.0" fill="rgb(236,180,5)" rx="2" ry="2" />
+<text  x="1834.60" y="509.5" ></text>
+</g>
+<g >
+<title>prepare_ftrace_return (2 samples, 0.50%)</title><rect x="1886.0" y="637" width="10.0" height="19.0" fill="rgb(234,109,43)" rx="2" ry="2" />
+<text  x="1889.05" y="649.5" ></text>
+</g>
+<g >
+<title>chacha20_block (46 samples, 11.50%)</title><rect x="683.2" y="637" width="227.7" height="19.0" fill="rgb(231,52,51)" rx="2" ry="2" />
+<text  x="686.20" y="649.5" >chacha20_block</text>
+</g>
+<g >
+<title>ftrace_graph_caller (2 samples, 0.50%)</title><rect x="104.0" y="737" width="10.0" height="19.0" fill="rgb(211,27,51)" rx="2" ry="2" />
+<text  x="107.05" y="749.5" ></text>
+</g>
+<g >
+<title>sched_clock (1 samples, 0.25%)</title><rect x="1168.3" y="517" width="4.9" height="19.0" fill="rgb(205,227,47)" rx="2" ry="2" />
+<text  x="1171.30" y="529.5" ></text>
+</g>
+<g >
+<title>delete_from_page_cache_batch (1 samples, 0.25%)</title><rect x="49.6" y="557" width="5.0" height="19.0" fill="rgb(243,21,7)" rx="2" ry="2" />
+<text  x="52.60" y="569.5" ></text>
+</g>
+<g >
+<title>function_graph_enter (1 samples, 0.25%)</title><rect x="1470.2" y="457" width="5.0" height="19.0" fill="rgb(209,49,41)" rx="2" ry="2" />
+<text  x="1473.25" y="469.5" ></text>
+</g>
+<g >
+<title>native_sched_clock (1 samples, 0.25%)</title><rect x="366.4" y="577" width="5.0" height="19.0" fill="rgb(232,39,21)" rx="2" ry="2" />
+<text  x="369.40" y="589.5" ></text>
+</g>
+<g >
+<title>function_graph_enter (1 samples, 0.25%)</title><rect x="1871.2" y="577" width="5.0" height="19.0" fill="rgb(212,54,32)" rx="2" ry="2" />
+<text  x="1874.20" y="589.5" ></text>
+</g>
+<g >
+<title>clean_bdev_aliases (1 samples, 0.25%)</title><rect x="1346.5" y="577" width="5.0" height="19.0" fill="rgb(248,128,10)" rx="2" ry="2" />
+<text  x="1349.50" y="589.5" ></text>
+</g>
+<g >
+<title>search_binary_handler (5 samples, 1.25%)</title><rect x="1965.2" y="817" width="24.8" height="19.0" fill="rgb(209,199,9)" rx="2" ry="2" />
+<text  x="1968.25" y="829.5" >s..</text>
+</g>
+<g >
+<title>sys_read (203 samples, 50.75%)</title><rect x="89.2" y="757" width="1004.8" height="19.0" fill="rgb(211,21,37)" rx="2" ry="2" />
+<text  x="92.20" y="769.5" >sys_read</text>
+</g>
+<g >
+<title>trace_graph_entry (1 samples, 0.25%)</title><rect x="1950.4" y="637" width="5.0" height="19.0" fill="rgb(253,212,48)" rx="2" ry="2" />
+<text  x="1953.40" y="649.5" ></text>
+</g>
+<g >
+<title>ftrace_graph_caller (1 samples, 0.25%)</title><rect x="1777.2" y="437" width="4.9" height="19.0" fill="rgb(206,136,1)" rx="2" ry="2" />
+<text  x="1780.15" y="449.5" ></text>
+</g>
+<g >
+<title>security_file_permission (7 samples, 1.75%)</title><rect x="1059.4" y="697" width="34.6" height="19.0" fill="rgb(218,94,38)" rx="2" ry="2" />
+<text  x="1062.40" y="709.5" >se..</text>
+</g>
+<g >
+<title>prepare_ftrace_return (3 samples, 0.75%)</title><rect x="1529.7" y="437" width="14.8" height="19.0" fill="rgb(247,225,51)" rx="2" ry="2" />
+<text  x="1532.65" y="449.5" ></text>
+</g>
+<g >
+<title>__indirect_thunk_start (1 samples, 0.25%)</title><rect x="1861.3" y="537" width="4.9" height="19.0" fill="rgb(231,18,41)" rx="2" ry="2" />
+<text  x="1864.30" y="549.5" ></text>
+</g>
+<g >
+<title>prepare_ftrace_return (1 samples, 0.25%)</title><rect x="346.6" y="577" width="5.0" height="19.0" fill="rgb(236,165,35)" rx="2" ry="2" />
+<text  x="349.60" y="589.5" ></text>
+</g>
+<g >
+<title>ftrace_graph_caller (2 samples, 0.50%)</title><rect x="1688.0" y="437" width="10.0" height="19.0" fill="rgb(235,165,50)" rx="2" ry="2" />
+<text  x="1691.05" y="449.5" ></text>
+</g>
+<g >
+<title>native_sched_clock (1 samples, 0.25%)</title><rect x="1158.4" y="537" width="5.0" height="19.0" fill="rgb(245,202,54)" rx="2" ry="2" />
+<text  x="1161.40" y="549.5" ></text>
+</g>
+<g >
+<title>sched_clock (1 samples, 0.25%)</title><rect x="1376.2" y="457" width="5.0" height="19.0" fill="rgb(248,22,32)" rx="2" ry="2" />
+<text  x="1379.20" y="469.5" ></text>
+</g>
+<g >
+<title>__indirect_thunk_start (1 samples, 0.25%)</title><rect x="1574.2" y="417" width="5.0" height="19.0" fill="rgb(229,3,7)" rx="2" ry="2" />
+<text  x="1577.20" y="429.5" ></text>
+</g>
+<g >
+<title>[dd] (394 samples, 98.50%)</title><rect x="10.0" y="837" width="1950.3" height="19.0" fill="rgb(210,71,4)" rx="2" ry="2" />
+<text  x="13.00" y="849.5" >[dd]</text>
+</g>
+<g >
+<title>prepare_ftrace_return (6 samples, 1.50%)</title><rect x="584.2" y="597" width="29.7" height="19.0" fill="rgb(244,189,32)" rx="2" ry="2" />
+<text  x="587.20" y="609.5" >pr..</text>
+</g>
+<g >
+<title>prepare_ftrace_return (2 samples, 0.50%)</title><rect x="351.6" y="617" width="9.8" height="19.0" fill="rgb(250,197,18)" rx="2" ry="2" />
+<text  x="354.55" y="629.5" ></text>
+</g>
+<g >
+<title>native_sched_clock (1 samples, 0.25%)</title><rect x="104.0" y="637" width="5.0" height="19.0" fill="rgb(247,14,1)" rx="2" ry="2" />
+<text  x="107.05" y="649.5" ></text>
+</g>
+<g >
+<title>prepare_ftrace_return (1 samples, 0.25%)</title><rect x="1128.7" y="717" width="5.0" height="19.0" fill="rgb(232,201,16)" rx="2" ry="2" />
+<text  x="1131.70" y="729.5" ></text>
+</g>
+<g >
+<title>__ext4_handle_dirty_metadata (5 samples, 1.25%)</title><rect x="1584.1" y="477" width="24.8" height="19.0" fill="rgb(250,105,16)" rx="2" ry="2" />
+<text  x="1587.10" y="489.5" >_..</text>
+</g>
+<g >
+<title>dget_parent (1 samples, 0.25%)</title><rect x="1064.4" y="657" width="4.9" height="19.0" fill="rgb(221,70,10)" rx="2" ry="2" />
+<text  x="1067.35" y="669.5" ></text>
+</g>
+<g >
+<title>trace_graph_entry (1 samples, 0.25%)</title><rect x="1851.4" y="517" width="5.0" height="19.0" fill="rgb(218,185,41)" rx="2" ry="2" />
+<text  x="1854.40" y="529.5" ></text>
+</g>
+<g >
+<title>ftrace_graph_caller (2 samples, 0.50%)</title><rect x="34.8" y="437" width="9.8" height="19.0" fill="rgb(248,193,20)" rx="2" ry="2" />
+<text  x="37.75" y="449.5" ></text>
+</g>
+<g >
+<title>bio_endio (1 samples, 0.25%)</title><rect x="39.7" y="77" width="4.9" height="19.0" fill="rgb(225,24,17)" rx="2" ry="2" />
+<text  x="42.70" y="89.5" ></text>
+</g>
+<g >
+<title>function_graph_enter (1 samples, 0.25%)</title><rect x="1603.9" y="397" width="5.0" height="19.0" fill="rgb(247,109,41)" rx="2" ry="2" />
+<text  x="1606.90" y="409.5" ></text>
+</g>
+<g >
+<title>map_id_up (2 samples, 0.50%)</title><rect x="1688.0" y="457" width="10.0" height="19.0" fill="rgb(245,207,50)" rx="2" ry="2" />
+<text  x="1691.05" y="469.5" ></text>
+</g>
+<g >
+<title>__sb_start_write (1 samples, 0.25%)</title><rect x="1138.6" y="717" width="4.9" height="19.0" fill="rgb(248,11,16)" rx="2" ry="2" />
+<text  x="1141.60" y="729.5" ></text>
+</g>
+<g >
+<title>__indirect_thunk_start (1 samples, 0.25%)</title><rect x="915.9" y="597" width="4.9" height="19.0" fill="rgb(241,138,23)" rx="2" ry="2" />
+<text  x="918.85" y="609.5" ></text>
+</g>
+<g >
+<title>truncate_pagecache (1 samples, 0.25%)</title><rect x="49.6" y="597" width="5.0" height="19.0" fill="rgb(226,56,22)" rx="2" ry="2" />
+<text  x="52.60" y="609.5" ></text>
+</g>
+<g >
+<title>do_syscall_64 (173 samples, 43.25%)</title><rect x="1099.0" y="777" width="856.4" height="19.0" fill="rgb(219,16,11)" rx="2" ry="2" />
+<text  x="1102.00" y="789.5" >do_syscall_64</text>
+</g>
+<g >
+<title>ftrace_graph_caller (3 samples, 0.75%)</title><rect x="1198.0" y="637" width="14.9" height="19.0" fill="rgb(232,210,19)" rx="2" ry="2" />
+<text  x="1201.00" y="649.5" ></text>
+</g>
+<g >
+<title>trace_clock_local (1 samples, 0.25%)</title><rect x="1376.2" y="477" width="5.0" height="19.0" fill="rgb(207,218,3)" rx="2" ry="2" />
+<text  x="1379.20" y="489.5" ></text>
+</g>
+<g >
+<title>function_graph_enter (1 samples, 0.25%)</title><rect x="1232.7" y="537" width="4.9" height="19.0" fill="rgb(220,56,36)" rx="2" ry="2" />
+<text  x="1235.65" y="549.5" ></text>
+</g>
+<g >
+<title>unlock_page (1 samples, 0.25%)</title><rect x="1455.4" y="597" width="5.0" height="19.0" fill="rgb(249,107,45)" rx="2" ry="2" />
+<text  x="1458.40" y="609.5" ></text>
+</g>
+<g >
+<title>trace_clock_local (2 samples, 0.50%)</title><rect x="1663.3" y="357" width="9.9" height="19.0" fill="rgb(244,71,10)" rx="2" ry="2" />
+<text  x="1666.30" y="369.5" ></text>
+</g>
+<g >
+<title>_dl_map_object_from_fd (1 samples, 0.25%)</title><rect x="1960.3" y="897" width="4.9" height="19.0" fill="rgb(206,190,28)" rx="2" ry="2" />
+<text  x="1963.30" y="909.5" ></text>
+</g>
+<g >
+<title>ftrace_graph_caller (1 samples, 0.25%)</title><rect x="1193.0" y="477" width="5.0" height="19.0" fill="rgb(238,229,5)" rx="2" ry="2" />
+<text  x="1196.05" y="489.5" ></text>
+</g>
+<g >
+<title>function_graph_enter (4 samples, 1.00%)</title><rect x="1623.7" y="357" width="19.8" height="19.0" fill="rgb(226,164,34)" rx="2" ry="2" />
+<text  x="1626.70" y="369.5" ></text>
+</g>
+<g >
+<title>native_sched_clock (1 samples, 0.25%)</title><rect x="1168.3" y="497" width="4.9" height="19.0" fill="rgb(214,71,3)" rx="2" ry="2" />
+<text  x="1171.30" y="509.5" ></text>
+</g>
+<g >
+<title>function_graph_enter (1 samples, 0.25%)</title><rect x="1336.6" y="537" width="4.9" height="19.0" fill="rgb(251,166,17)" rx="2" ry="2" />
+<text  x="1339.60" y="549.5" ></text>
+</g>
+<g >
+<title>ftrace_graph_caller (1 samples, 0.25%)</title><rect x="1366.3" y="497" width="4.9" height="19.0" fill="rgb(232,31,10)" rx="2" ry="2" />
+<text  x="1369.30" y="509.5" ></text>
+</g>
+<g >
+<title>ftrace_graph_caller (2 samples, 0.50%)</title><rect x="1866.2" y="617" width="10.0" height="19.0" fill="rgb(234,0,28)" rx="2" ry="2" />
+<text  x="1869.25" y="629.5" ></text>
+</g>
+<g >
+<title>sched_clock (1 samples, 0.25%)</title><rect x="104.0" y="657" width="5.0" height="19.0" fill="rgb(208,170,7)" rx="2" ry="2" />
+<text  x="107.05" y="669.5" ></text>
+</g>
+<g >
+<title>get_page_from_freelist (2 samples, 0.50%)</title><rect x="1386.1" y="497" width="9.9" height="19.0" fill="rgb(243,147,34)" rx="2" ry="2" />
+<text  x="1389.10" y="509.5" ></text>
+</g>
+<g >
+<title>prepare_ftrace_return (1 samples, 0.25%)</title><rect x="1425.7" y="477" width="5.0" height="19.0" fill="rgb(239,124,49)" rx="2" ry="2" />
+<text  x="1428.70" y="489.5" ></text>
+</g>
+<g >
+<title>__fdget_pos (3 samples, 0.75%)</title><rect x="89.2" y="737" width="14.8" height="19.0" fill="rgb(239,20,2)" rx="2" ry="2" />
+<text  x="92.20" y="749.5" ></text>
+</g>
+<g >
+<title>prepare_ftrace_return (2 samples, 0.50%)</title><rect x="1183.2" y="597" width="9.8" height="19.0" fill="rgb(220,200,50)" rx="2" ry="2" />
+<text  x="1186.15" y="609.5" ></text>
+</g>
+<g >
+<title>ftrace_graph_caller (2 samples, 0.50%)</title><rect x="1118.8" y="717" width="9.9" height="19.0" fill="rgb(220,212,32)" rx="2" ry="2" />
+<text  x="1121.80" y="729.5" ></text>
+</g>
+<g >
+<title>syscall_return_via_sysret (1 samples, 0.25%)</title><rect x="1094.0" y="797" width="5.0" height="19.0" fill="rgb(246,143,9)" rx="2" ry="2" />
+<text  x="1097.05" y="809.5" ></text>
+</g>
+<g >
+<title>native_sched_clock (1 samples, 0.25%)</title><rect x="1227.7" y="497" width="5.0" height="19.0" fill="rgb(209,193,9)" rx="2" ry="2" />
+<text  x="1230.70" y="509.5" ></text>
+</g>
+<g >
+<title>function_graph_enter (2 samples, 0.50%)</title><rect x="1183.2" y="577" width="9.8" height="19.0" fill="rgb(233,196,18)" rx="2" ry="2" />
+<text  x="1186.15" y="589.5" ></text>
+</g>
+<g >
+<title>ftrace_graph_caller (1 samples, 0.25%)</title><rect x="1138.6" y="657" width="4.9" height="19.0" fill="rgb(233,49,45)" rx="2" ry="2" />
+<text  x="1141.60" y="669.5" ></text>
+</g>
+<g >
+<title>trace_clock_local (1 samples, 0.25%)</title><rect x="1440.5" y="497" width="5.0" height="19.0" fill="rgb(205,147,5)" rx="2" ry="2" />
+<text  x="1443.55" y="509.5" ></text>
+</g>
+<g >
+<title>prefetch_freepointer (1 samples, 0.25%)</title><rect x="1193.0" y="497" width="5.0" height="19.0" fill="rgb(215,201,36)" rx="2" ry="2" />
+<text  x="1196.05" y="509.5" ></text>
+</g>
+<g >
+<title>prepare_ftrace_return (1 samples, 0.25%)</title><rect x="1455.4" y="557" width="5.0" height="19.0" fill="rgb(233,54,16)" rx="2" ry="2" />
+<text  x="1458.40" y="569.5" ></text>
+</g>
+<g >
+<title>_cond_resched (4 samples, 1.00%)</title><rect x="1524.7" y="497" width="19.8" height="19.0" fill="rgb(244,74,45)" rx="2" ry="2" />
+<text  x="1527.70" y="509.5" ></text>
+</g>
+<g >
+<title>native_sched_clock (1 samples, 0.25%)</title><rect x="356.5" y="537" width="4.9" height="19.0" fill="rgb(225,143,51)" rx="2" ry="2" />
+<text  x="359.50" y="549.5" ></text>
+</g>
+<g >
+<title>rcu_all_qs (1 samples, 0.25%)</title><rect x="1341.5" y="577" width="5.0" height="19.0" fill="rgb(210,179,51)" rx="2" ry="2" />
+<text  x="1344.55" y="589.5" ></text>
+</g>
+<g >
+<title>kmem_cache_alloc (1 samples, 0.25%)</title><rect x="1193.0" y="517" width="5.0" height="19.0" fill="rgb(248,183,24)" rx="2" ry="2" />
+<text  x="1196.05" y="529.5" ></text>
+</g>
+<g >
+<title>trace_clock_local (1 samples, 0.25%)</title><rect x="123.9" y="637" width="4.9" height="19.0" fill="rgb(234,202,34)" rx="2" ry="2" />
+<text  x="126.85" y="649.5" ></text>
+</g>
+<g >
+<title>rcu_all_qs (2 samples, 0.50%)</title><rect x="1589.0" y="437" width="10.0" height="19.0" fill="rgb(236,170,22)" rx="2" ry="2" />
+<text  x="1592.05" y="449.5" ></text>
+</g>
+<g >
+<title>ftrace_graph_caller (1 samples, 0.25%)</title><rect x="1455.4" y="577" width="5.0" height="19.0" fill="rgb(212,176,51)" rx="2" ry="2" />
+<text  x="1458.40" y="589.5" ></text>
+</g>
+<g >
+<title>ftrace_graph_is_dead (1 samples, 0.25%)</title><rect x="1866.2" y="597" width="5.0" height="19.0" fill="rgb(222,223,12)" rx="2" ry="2" />
+<text  x="1869.25" y="609.5" ></text>
+</g>
+<g >
+<title>__es_insert_extent (1 samples, 0.25%)</title><rect x="1361.4" y="537" width="4.9" height="19.0" fill="rgb(246,58,3)" rx="2" ry="2" />
+<text  x="1364.35" y="549.5" ></text>
+</g>
+<g >
+<title>ftrace_graph_caller (2 samples, 0.50%)</title><rect x="1415.8" y="517" width="9.9" height="19.0" fill="rgb(238,218,46)" rx="2" ry="2" />
+<text  x="1418.80" y="529.5" ></text>
+</g>
+<g >
+<title>____fput (8 samples, 2.00%)</title><rect x="10.0" y="697" width="39.6" height="19.0" fill="rgb(253,67,40)" rx="2" ry="2" />
+<text  x="13.00" y="709.5" >___..</text>
+</g>
+<g >
+<title>prepare_ftrace_return (1 samples, 0.25%)</title><rect x="1113.9" y="677" width="4.9" height="19.0" fill="rgb(241,163,36)" rx="2" ry="2" />
+<text  x="1116.85" y="689.5" ></text>
+</g>
+<g >
+<title>ext4_get_group_desc (1 samples, 0.25%)</title><rect x="1767.2" y="477" width="5.0" height="19.0" fill="rgb(221,179,51)" rx="2" ry="2" />
+<text  x="1770.25" y="489.5" ></text>
+</g>
+<g >
+<title>ext4_da_write_end (82 samples, 20.50%)</title><rect x="1460.4" y="617" width="405.8" height="19.0" fill="rgb(207,44,33)" rx="2" ry="2" />
+<text  x="1463.35" y="629.5" >ext4_da_write_end</text>
+</g>
+<g >
+<title>ftrace_lookup_ip (1 samples, 0.25%)</title><rect x="1019.8" y="577" width="5.0" height="19.0" fill="rgb(234,55,43)" rx="2" ry="2" />
+<text  x="1022.80" y="589.5" ></text>
+</g>
+<g >
+<title>check_stack_object (11 samples, 2.75%)</title><rect x="148.6" y="657" width="54.5" height="19.0" fill="rgb(245,105,4)" rx="2" ry="2" />
+<text  x="151.60" y="669.5" >check..</text>
+</g>
+<g >
+<title>sched_clock (1 samples, 0.25%)</title><rect x="356.5" y="557" width="4.9" height="19.0" fill="rgb(220,195,38)" rx="2" ry="2" />
+<text  x="359.50" y="569.5" ></text>
+</g>
+<g >
+<title>trace_graph_entry (1 samples, 0.25%)</title><rect x="1247.5" y="457" width="5.0" height="19.0" fill="rgb(254,113,49)" rx="2" ry="2" />
+<text  x="1250.50" y="469.5" ></text>
+</g>
+<g >
+<title>trace_graph_entry (1 samples, 0.25%)</title><rect x="1603.9" y="377" width="5.0" height="19.0" fill="rgb(223,141,16)" rx="2" ry="2" />
+<text  x="1606.90" y="389.5" ></text>
+</g>
+<g >
+<title>ftrace_graph_caller (1 samples, 0.25%)</title><rect x="1440.5" y="557" width="5.0" height="19.0" fill="rgb(227,119,6)" rx="2" ry="2" />
+<text  x="1443.55" y="569.5" ></text>
+</g>
+<g >
+<title>prepare_ftrace_return (1 samples, 0.25%)</title><rect x="49.6" y="497" width="5.0" height="19.0" fill="rgb(225,96,48)" rx="2" ry="2" />
+<text  x="52.60" y="509.5" ></text>
+</g>
+<g >
+<title>trace_graph_entry (1 samples, 0.25%)</title><rect x="49.6" y="457" width="5.0" height="19.0" fill="rgb(205,132,9)" rx="2" ry="2" />
+<text  x="52.60" y="469.5" ></text>
+</g>
+<g >
+<title>generic_update_time (1 samples, 0.25%)</title><rect x="1193.0" y="617" width="5.0" height="19.0" fill="rgb(248,66,51)" rx="2" ry="2" />
+<text  x="1196.05" y="629.5" ></text>
+</g>
+<g >
+<title>function_graph_enter (8 samples, 2.00%)</title><rect x="158.5" y="597" width="39.6" height="19.0" fill="rgb(229,4,6)" rx="2" ry="2" />
+<text  x="161.50" y="609.5" >fun..</text>
+</g>
+<g >
+<title>_cond_resched (2 samples, 0.50%)</title><rect x="1405.9" y="557" width="9.9" height="19.0" fill="rgb(243,108,26)" rx="2" ry="2" />
+<text  x="1408.90" y="569.5" ></text>
+</g>
+<g >
+<title>trace_clock_local (1 samples, 0.25%)</title><rect x="1039.6" y="637" width="4.9" height="19.0" fill="rgb(247,84,45)" rx="2" ry="2" />
+<text  x="1042.60" y="649.5" ></text>
+</g>
+<g >
+<title>trace_clock_local (1 samples, 0.25%)</title><rect x="1138.6" y="617" width="4.9" height="19.0" fill="rgb(210,122,1)" rx="2" ry="2" />
+<text  x="1141.60" y="629.5" ></text>
+</g>
+<g >
+<title>node_dirty_ok (2 samples, 0.50%)</title><rect x="1386.1" y="477" width="9.9" height="19.0" fill="rgb(211,24,2)" rx="2" ry="2" />
+<text  x="1389.10" y="489.5" ></text>
+</g>
+<g >
+<title>[dd] (394 samples, 98.50%)</title><rect x="10.0" y="857" width="1950.3" height="19.0" fill="rgb(236,14,10)" rx="2" ry="2" />
+<text  x="13.00" y="869.5" >[dd]</text>
+</g>
+<g >
+<title>prepare_ftrace_return (1 samples, 0.25%)</title><rect x="1391.0" y="437" width="5.0" height="19.0" fill="rgb(217,97,41)" rx="2" ry="2" />
+<text  x="1394.05" y="449.5" ></text>
+</g>
+<g >
+<title>nvme_irq (1 samples, 0.25%)</title><rect x="39.7" y="237" width="4.9" height="19.0" fill="rgb(216,67,20)" rx="2" ry="2" />
+<text  x="42.70" y="249.5" ></text>
+</g>
+<g >
+<title>prepare_ftrace_return (1 samples, 0.25%)</title><rect x="24.9" y="437" width="4.9" height="19.0" fill="rgb(223,163,1)" rx="2" ry="2" />
+<text  x="27.85" y="449.5" ></text>
+</g>
+<g >
+<title>prepare_ftrace_return (1 samples, 0.25%)</title><rect x="1861.3" y="557" width="4.9" height="19.0" fill="rgb(243,115,27)" rx="2" ry="2" />
+<text  x="1864.30" y="569.5" ></text>
+</g>
+<g >
+<title>trace_clock_local (2 samples, 0.50%)</title><rect x="227.8" y="597" width="9.9" height="19.0" fill="rgb(222,226,31)" rx="2" ry="2" />
+<text  x="230.80" y="609.5" ></text>
+</g>
+<g >
+<title>__blk_mq_complete_request (1 samples, 0.25%)</title><rect x="39.7" y="177" width="4.9" height="19.0" fill="rgb(248,220,25)" rx="2" ry="2" />
+<text  x="42.70" y="189.5" ></text>
+</g>
+<g >
+<title>native_write_msr (3 samples, 0.75%)</title><rect x="1970.2" y="657" width="14.9" height="19.0" fill="rgb(238,8,23)" rx="2" ry="2" />
+<text  x="1973.20" y="669.5" ></text>
+</g>
+<g >
+<title>ftrace_graph_caller (1 samples, 0.25%)</title><rect x="1905.9" y="717" width="4.9" height="19.0" fill="rgb(250,121,1)" rx="2" ry="2" />
+<text  x="1908.85" y="729.5" ></text>
+</g>
+<g >
+<title>fsnotify (1 samples, 0.25%)</title><rect x="1089.1" y="677" width="4.9" height="19.0" fill="rgb(246,15,35)" rx="2" ry="2" />
+<text  x="1092.10" y="689.5" ></text>
+</g>
+<g >
+<title>function_graph_enter (2 samples, 0.50%)</title><rect x="351.6" y="597" width="9.8" height="19.0" fill="rgb(253,123,52)" rx="2" ry="2" />
+<text  x="354.55" y="609.5" ></text>
+</g>
+<g >
+<title>load_elf_binary (5 samples, 1.25%)</title><rect x="1965.2" y="797" width="24.8" height="19.0" fill="rgb(238,161,29)" rx="2" ry="2" />
+<text  x="1968.25" y="809.5" >l..</text>
+</g>
+<g >
+<title>prepare_ftrace_return (1 samples, 0.25%)</title><rect x="1381.2" y="557" width="4.9" height="19.0" fill="rgb(218,78,14)" rx="2" ry="2" />
+<text  x="1384.15" y="569.5" ></text>
+</g>
+<g >
+<title>__brelse (2 samples, 0.50%)</title><rect x="1574.2" y="477" width="9.9" height="19.0" fill="rgb(251,204,52)" rx="2" ry="2" />
+<text  x="1577.20" y="489.5" ></text>
+</g>
+<g >
+<title>ftrace_lookup_ip (1 samples, 0.25%)</title><rect x="193.2" y="557" width="4.9" height="19.0" fill="rgb(245,194,19)" rx="2" ry="2" />
+<text  x="196.15" y="569.5" ></text>
+</g>
+<g >
+<title>prepare_ftrace_return (1 samples, 0.25%)</title><rect x="1089.1" y="637" width="4.9" height="19.0" fill="rgb(233,83,39)" rx="2" ry="2" />
+<text  x="1092.10" y="649.5" ></text>
+</g>
+<g >
+<title>file_remove_privs (2 samples, 0.50%)</title><rect x="1153.5" y="637" width="9.9" height="19.0" fill="rgb(249,41,4)" rx="2" ry="2" />
+<text  x="1156.45" y="649.5" ></text>
+</g>
+<g >
+<title>_cond_resched (3 samples, 0.75%)</title><rect x="1732.6" y="457" width="14.9" height="19.0" fill="rgb(236,168,33)" rx="2" ry="2" />
+<text  x="1735.60" y="469.5" ></text>
+</g>
+<g >
+<title>memcg_kmem_put_cache (1 samples, 0.25%)</title><rect x="1287.1" y="537" width="4.9" height="19.0" fill="rgb(208,204,34)" rx="2" ry="2" />
+<text  x="1290.10" y="549.5" ></text>
+</g>
+<g >
+<title>apparmor_file_permission (6 samples, 1.50%)</title><rect x="1920.7" y="677" width="29.7" height="19.0" fill="rgb(221,140,6)" rx="2" ry="2" />
+<text  x="1923.70" y="689.5" >ap..</text>
+</g>
+<g >
+<title>dput (1 samples, 0.25%)</title><rect x="1034.7" y="717" width="4.9" height="19.0" fill="rgb(219,144,3)" rx="2" ry="2" />
+<text  x="1037.65" y="729.5" ></text>
+</g>
+<g >
+<title>up_write (1 samples, 0.25%)</title><rect x="1896.0" y="657" width="4.9" height="19.0" fill="rgb(232,209,7)" rx="2" ry="2" />
+<text  x="1898.95" y="669.5" ></text>
+</g>
+<g >
+<title>prepare_ftrace_return (1 samples, 0.25%)</title><rect x="1138.6" y="637" width="4.9" height="19.0" fill="rgb(209,221,31)" rx="2" ry="2" />
+<text  x="1141.60" y="649.5" ></text>
+</g>
+<g >
+<title>prepare_ftrace_return (1 samples, 0.25%)</title><rect x="1495.0" y="497" width="5.0" height="19.0" fill="rgb(219,116,24)" rx="2" ry="2" />
+<text  x="1498.00" y="509.5" ></text>
+</g>
+<g >
+<title>function_graph_enter (7 samples, 1.75%)</title><rect x="1643.5" y="377" width="34.7" height="19.0" fill="rgb(230,208,21)" rx="2" ry="2" />
+<text  x="1646.50" y="389.5" >fu..</text>
+</g>
+<g >
+<title>rcu_all_qs (2 samples, 0.50%)</title><rect x="1405.9" y="537" width="9.9" height="19.0" fill="rgb(249,94,5)" rx="2" ry="2" />
+<text  x="1408.90" y="549.5" ></text>
+</g>
+<g >
+<title>prepare_ftrace_return (1 samples, 0.25%)</title><rect x="1193.0" y="457" width="5.0" height="19.0" fill="rgb(231,22,30)" rx="2" ry="2" />
+<text  x="1196.05" y="469.5" ></text>
+</g>
+<g >
+<title>[dd] (394 samples, 98.50%)</title><rect x="10.0" y="897" width="1950.3" height="19.0" fill="rgb(205,16,12)" rx="2" ry="2" />
+<text  x="13.00" y="909.5" >[dd]</text>
+</g>
+<g >
+<title>sched_clock (1 samples, 0.25%)</title><rect x="1207.9" y="557" width="5.0" height="19.0" fill="rgb(217,103,8)" rx="2" ry="2" />
+<text  x="1210.90" y="569.5" ></text>
+</g>
+<g >
+<title>_cond_resched (1 samples, 0.25%)</title><rect x="1138.6" y="697" width="4.9" height="19.0" fill="rgb(245,16,41)" rx="2" ry="2" />
+<text  x="1141.60" y="709.5" ></text>
+</g>
+<g >
+<title>_cond_resched (2 samples, 0.50%)</title><rect x="1589.0" y="457" width="10.0" height="19.0" fill="rgb(253,26,23)" rx="2" ry="2" />
+<text  x="1592.05" y="469.5" ></text>
+</g>
+<g >
+<title>jbd2__journal_start (1 samples, 0.25%)</title><rect x="1193.0" y="537" width="5.0" height="19.0" fill="rgb(214,6,15)" rx="2" ry="2" />
+<text  x="1196.05" y="549.5" ></text>
+</g>
+<g >
+<title>strlcpy (1 samples, 0.25%)</title><rect x="1985.1" y="757" width="4.9" height="19.0" fill="rgb(210,38,28)" rx="2" ry="2" />
+<text  x="1988.05" y="769.5" ></text>
+</g>
+<g >
+<title>unaccount_page_cache_page (1 samples, 0.25%)</title><rect x="49.6" y="537" width="5.0" height="19.0" fill="rgb(249,103,32)" rx="2" ry="2" />
+<text  x="52.60" y="549.5" ></text>
+</g>
+<g >
+<title>vfs_getattr (1 samples, 0.25%)</title><rect x="1960.3" y="737" width="4.9" height="19.0" fill="rgb(250,226,21)" rx="2" ry="2" />
+<text  x="1963.30" y="749.5" ></text>
+</g>
+<g >
+<title>__fget_light (1 samples, 0.25%)</title><rect x="1113.9" y="717" width="4.9" height="19.0" fill="rgb(205,145,36)" rx="2" ry="2" />
+<text  x="1116.85" y="729.5" ></text>
+</g>
+<g >
+<title>trace_graph_entry (1 samples, 0.25%)</title><rect x="1673.2" y="357" width="5.0" height="19.0" fill="rgb(237,185,8)" rx="2" ry="2" />
+<text  x="1676.20" y="369.5" ></text>
+</g>
+<g >
+<title>grab_cache_page_write_begin (15 samples, 3.75%)</title><rect x="1381.2" y="597" width="74.2" height="19.0" fill="rgb(214,33,24)" rx="2" ry="2" />
+<text  x="1384.15" y="609.5" >grab_cac..</text>
+</g>
+<g >
+<title>prepare_ftrace_return (1 samples, 0.25%)</title><rect x="1544.5" y="477" width="5.0" height="19.0" fill="rgb(211,38,49)" rx="2" ry="2" />
+<text  x="1547.50" y="489.5" ></text>
+</g>
+<g >
+<title>ftrace_graph_caller (2 samples, 0.50%)</title><rect x="1153.5" y="617" width="9.9" height="19.0" fill="rgb(214,32,43)" rx="2" ry="2" />
+<text  x="1156.45" y="629.5" ></text>
+</g>
+<g >
+<title>__block_commit_write.isra.34 (5 samples, 1.25%)</title><rect x="1821.7" y="557" width="24.8" height="19.0" fill="rgb(205,95,17)" rx="2" ry="2" />
+<text  x="1824.70" y="569.5" >_..</text>
+</g>
+<g >
+<title>sys_write (170 samples, 42.50%)</title><rect x="1113.9" y="757" width="841.5" height="19.0" fill="rgb(254,2,48)" rx="2" ry="2" />
+<text  x="1116.85" y="769.5" >sys_write</text>
+</g>
+<g >
+<title>trace_graph_entry (2 samples, 0.50%)</title><rect x="1485.1" y="437" width="9.9" height="19.0" fill="rgb(254,78,38)" rx="2" ry="2" />
+<text  x="1488.10" y="449.5" ></text>
+</g>
+<g >
+<title>trace_graph_entry (2 samples, 0.50%)</title><rect x="673.3" y="577" width="9.9" height="19.0" fill="rgb(225,138,49)" rx="2" ry="2" />
+<text  x="676.30" y="589.5" ></text>
+</g>
+<g >
+<title>trace_graph_entry (1 samples, 0.25%)</title><rect x="1133.7" y="637" width="4.9" height="19.0" fill="rgb(212,92,4)" rx="2" ry="2" />
+<text  x="1136.65" y="649.5" ></text>
+</g>
+<g >
+<title>function_graph_enter (3 samples, 0.75%)</title><rect x="1480.2" y="457" width="14.8" height="19.0" fill="rgb(245,176,37)" rx="2" ry="2" />
+<text  x="1483.15" y="469.5" ></text>
+</g>
+<g >
+<title>syscall_return_via_sysret (1 samples, 0.25%)</title><rect x="1955.4" y="797" width="4.9" height="19.0" fill="rgb(246,208,39)" rx="2" ry="2" />
+<text  x="1958.35" y="809.5" ></text>
+</g>
+<g >
+<title>native_sched_clock (1 samples, 0.25%)</title><rect x="371.4" y="557" width="4.9" height="19.0" fill="rgb(226,207,20)" rx="2" ry="2" />
+<text  x="374.35" y="569.5" ></text>
+</g>
+<g >
+<title>ftrace_graph_caller (2 samples, 0.50%)</title><rect x="1712.8" y="437" width="9.9" height="19.0" fill="rgb(226,167,22)" rx="2" ry="2" />
+<text  x="1715.80" y="449.5" ></text>
+</g>
+<g >
+<title>__ext4_journal_get_write_access (6 samples, 1.50%)</title><rect x="1772.2" y="497" width="29.7" height="19.0" fill="rgb(219,214,9)" rx="2" ry="2" />
+<text  x="1775.20" y="509.5" >__..</text>
+</g>
+<g >
+<title>__wake_up (9 samples, 2.25%)</title><rect x="1465.3" y="557" width="44.6" height="19.0" fill="rgb(229,183,7)" rx="2" ry="2" />
+<text  x="1468.30" y="569.5" >__wa..</text>
+</g>
+<g >
+<title>trace_graph_entry (1 samples, 0.25%)</title><rect x="198.1" y="597" width="5.0" height="19.0" fill="rgb(236,125,4)" rx="2" ry="2" />
+<text  x="201.10" y="609.5" ></text>
+</g>
+<g >
+<title>_raw_read_lock (2 samples, 0.50%)</title><rect x="1306.9" y="537" width="9.9" height="19.0" fill="rgb(242,137,48)" rx="2" ry="2" />
+<text  x="1309.90" y="549.5" ></text>
+</g>
+<g >
+<title>__generic_file_write_iter (146 samples, 36.50%)</title><rect x="1153.5" y="657" width="722.7" height="19.0" fill="rgb(223,88,33)" rx="2" ry="2" />
+<text  x="1156.45" y="669.5" >__generic_file_write_iter</text>
+</g>
+<g >
+<title>ftrace_graph_caller (4 samples, 1.00%)</title><rect x="1920.7" y="617" width="19.8" height="19.0" fill="rgb(236,57,3)" rx="2" ry="2" />
+<text  x="1923.70" y="629.5" ></text>
+</g>
+<g >
+<title>ftrace_graph_caller (1 samples, 0.25%)</title><rect x="1396.0" y="517" width="5.0" height="19.0" fill="rgb(216,126,46)" rx="2" ry="2" />
+<text  x="1399.00" y="529.5" ></text>
+</g>
+<g >
+<title>function_graph_enter (1 samples, 0.25%)</title><rect x="1029.7" y="637" width="5.0" height="19.0" fill="rgb(218,179,50)" rx="2" ry="2" />
+<text  x="1032.70" y="649.5" ></text>
+</g>
+<g >
+<title>ftrace_graph_caller (2 samples, 0.50%)</title><rect x="1386.1" y="457" width="9.9" height="19.0" fill="rgb(233,176,4)" rx="2" ry="2" />
+<text  x="1389.10" y="469.5" ></text>
+</g>
+<g >
+<title>sched_clock (1 samples, 0.25%)</title><rect x="1440.5" y="477" width="5.0" height="19.0" fill="rgb(253,79,45)" rx="2" ry="2" />
+<text  x="1443.55" y="489.5" ></text>
+</g>
+<g >
+<title>trace_graph_entry (1 samples, 0.25%)</title><rect x="1401.0" y="437" width="4.9" height="19.0" fill="rgb(222,19,31)" rx="2" ry="2" />
+<text  x="1403.95" y="449.5" ></text>
+</g>
+<g >
+<title>rcu_all_qs (1 samples, 0.25%)</title><rect x="1559.4" y="497" width="4.9" height="19.0" fill="rgb(209,68,39)" rx="2" ry="2" />
+<text  x="1562.35" y="509.5" ></text>
+</g>
+<g >
+<title>ftrace_lookup_ip (1 samples, 0.25%)</title><rect x="599.1" y="557" width="4.9" height="19.0" fill="rgb(243,25,8)" rx="2" ry="2" />
+<text  x="602.05" y="569.5" ></text>
+</g>
+<g >
+<title>ftrace_graph_caller (1 samples, 0.25%)</title><rect x="1544.5" y="497" width="5.0" height="19.0" fill="rgb(239,166,40)" rx="2" ry="2" />
+<text  x="1547.50" y="509.5" ></text>
+</g>
+<g >
+<title>crng_backtrack_protect (21 samples, 5.25%)</title><rect x="272.4" y="677" width="103.9" height="19.0" fill="rgb(230,18,32)" rx="2" ry="2" />
+<text  x="275.35" y="689.5" >crng_backtra..</text>
+</g>
+<g >
+<title>ftrace_graph_caller (2 samples, 0.50%)</title><rect x="1574.2" y="457" width="9.9" height="19.0" fill="rgb(225,23,40)" rx="2" ry="2" />
+<text  x="1577.20" y="469.5" ></text>
+</g>
+<g >
+<title>sched_clock (1 samples, 0.25%)</title><rect x="1544.5" y="417" width="5.0" height="19.0" fill="rgb(226,4,7)" rx="2" ry="2" />
+<text  x="1547.50" y="429.5" ></text>
+</g>
+<g >
+<title>path_openat (1 samples, 0.25%)</title><rect x="49.6" y="677" width="5.0" height="19.0" fill="rgb(207,32,13)" rx="2" ry="2" />
+<text  x="52.60" y="689.5" ></text>
+</g>
+<g >
+<title>__fsnotify_parent (3 samples, 0.75%)</title><rect x="1064.4" y="677" width="14.8" height="19.0" fill="rgb(219,86,27)" rx="2" ry="2" />
+<text  x="1067.35" y="689.5" ></text>
+</g>
+<g >
+<title>_crng_backtrack_protect (18 samples, 4.50%)</title><rect x="272.4" y="657" width="89.0" height="19.0" fill="rgb(243,142,29)" rx="2" ry="2" />
+<text  x="275.35" y="669.5" >_crng_back..</text>
+</g>
+<g >
+<title>__indirect_thunk_start (1 samples, 0.25%)</title><rect x="1915.8" y="657" width="4.9" height="19.0" fill="rgb(253,18,40)" rx="2" ry="2" />
+<text  x="1918.75" y="669.5" ></text>
+</g>
+<g >
+<title>prepare_ftrace_return (2 samples, 0.50%)</title><rect x="1846.5" y="537" width="9.9" height="19.0" fill="rgb(239,42,7)" rx="2" ry="2" />
+<text  x="1849.45" y="549.5" ></text>
+</g>
+<g >
+<title>prefetch_freepointer (1 samples, 0.25%)</title><rect x="1356.4" y="497" width="5.0" height="19.0" fill="rgb(230,228,37)" rx="2" ry="2" />
+<text  x="1359.40" y="509.5" ></text>
+</g>
+<g >
+<title>__ext4_journal_start_sb (5 samples, 1.25%)</title><rect x="1524.7" y="537" width="24.8" height="19.0" fill="rgb(223,9,27)" rx="2" ry="2" />
+<text  x="1527.70" y="549.5" >_..</text>
+</g>
+<g >
+<title>prepare_ftrace_return (1 samples, 0.25%)</title><rect x="1554.4" y="477" width="5.0" height="19.0" fill="rgb(247,163,23)" rx="2" ry="2" />
+<text  x="1557.40" y="489.5" ></text>
+</g>
+<g >
+<title>function_graph_enter (1 samples, 0.25%)</title><rect x="84.2" y="717" width="5.0" height="19.0" fill="rgb(216,97,45)" rx="2" ry="2" />
+<text  x="87.25" y="729.5" ></text>
+</g>
+<g >
+<title>nvme_process_cq (1 samples, 0.25%)</title><rect x="39.7" y="217" width="4.9" height="19.0" fill="rgb(205,191,22)" rx="2" ry="2" />
+<text  x="42.70" y="229.5" ></text>
+</g>
+<g >
+<title>prepare_ftrace_return (1 samples, 0.25%)</title><rect x="1252.5" y="537" width="4.9" height="19.0" fill="rgb(215,28,32)" rx="2" ry="2" />
+<text  x="1255.45" y="549.5" ></text>
+</g>
+<g >
+<title>native_sched_clock (1 samples, 0.25%)</title><rect x="1222.8" y="517" width="4.9" height="19.0" fill="rgb(252,98,37)" rx="2" ry="2" />
+<text  x="1225.75" y="529.5" ></text>
+</g>
+<g >
+<title>prepare_ftrace_return (2 samples, 0.50%)</title><rect x="366.4" y="637" width="9.9" height="19.0" fill="rgb(226,226,37)" rx="2" ry="2" />
+<text  x="369.40" y="649.5" ></text>
+</g>
+<g >
+<title>ftrace_graph_caller (1 samples, 0.25%)</title><rect x="1089.1" y="657" width="4.9" height="19.0" fill="rgb(206,49,15)" rx="2" ry="2" />
+<text  x="1092.10" y="669.5" ></text>
+</g>
+<g >
+<title>ftrace_graph_caller (1 samples, 0.25%)</title><rect x="346.6" y="597" width="5.0" height="19.0" fill="rgb(248,184,19)" rx="2" ry="2" />
+<text  x="349.60" y="609.5" ></text>
+</g>
+<g >
+<title>ftrace_graph_caller (1 samples, 0.25%)</title><rect x="1559.4" y="477" width="4.9" height="19.0" fill="rgb(250,174,44)" rx="2" ry="2" />
+<text  x="1562.35" y="489.5" ></text>
+</g>
+<g >
+<title>ext4_write_checks (1 samples, 0.25%)</title><rect x="1881.1" y="657" width="4.9" height="19.0" fill="rgb(248,225,37)" rx="2" ry="2" />
+<text  x="1884.10" y="669.5" ></text>
+</g>
+<g >
+<title>prepare_ftrace_return (2 samples, 0.50%)</title><rect x="1405.9" y="497" width="9.9" height="19.0" fill="rgb(213,192,13)" rx="2" ry="2" />
+<text  x="1408.90" y="509.5" ></text>
+</g>
+<g >
+<title>_raw_spin_unlock_irqrestore (3 samples, 0.75%)</title><rect x="1480.2" y="517" width="14.8" height="19.0" fill="rgb(232,190,49)" rx="2" ry="2" />
+<text  x="1483.15" y="529.5" ></text>
+</g>
+<g >
+<title>ftrace_graph_caller (1 samples, 0.25%)</title><rect x="1603.9" y="437" width="5.0" height="19.0" fill="rgb(211,157,13)" rx="2" ry="2" />
+<text  x="1606.90" y="449.5" ></text>
+</g>
+<g >
+<title>ftrace_graph_caller (1 samples, 0.25%)</title><rect x="1683.1" y="457" width="4.9" height="19.0" fill="rgb(220,99,50)" rx="2" ry="2" />
+<text  x="1686.10" y="469.5" ></text>
+</g>
+<g >
+<title>ftrace_graph_caller (2 samples, 0.50%)</title><rect x="351.6" y="637" width="9.8" height="19.0" fill="rgb(210,130,54)" rx="2" ry="2" />
+<text  x="354.55" y="649.5" ></text>
+</g>
+<g >
+<title>ftrace_graph_caller (2 samples, 0.50%)</title><rect x="1445.5" y="557" width="9.9" height="19.0" fill="rgb(224,146,49)" rx="2" ry="2" />
+<text  x="1448.50" y="569.5" ></text>
+</g>
+<g >
+<title>trace_graph_entry (2 samples, 0.50%)</title><rect x="1445.5" y="497" width="9.9" height="19.0" fill="rgb(244,123,44)" rx="2" ry="2" />
+<text  x="1448.50" y="509.5" ></text>
+</g>
+<g >
+<title>prepare_ftrace_return (1 samples, 0.25%)</title><rect x="118.9" y="657" width="5.0" height="19.0" fill="rgb(238,113,51)" rx="2" ry="2" />
+<text  x="121.90" y="669.5" ></text>
+</g>
+<g >
+<title>trace_clock_local (1 samples, 0.25%)</title><rect x="1544.5" y="437" width="5.0" height="19.0" fill="rgb(212,224,7)" rx="2" ry="2" />
+<text  x="1547.50" y="449.5" ></text>
+</g>
+<g >
+<title>prepare_ftrace_return (1 samples, 0.25%)</title><rect x="1549.5" y="497" width="4.9" height="19.0" fill="rgb(215,54,7)" rx="2" ry="2" />
+<text  x="1552.45" y="509.5" ></text>
+</g>
+<g >
+<title>aa_file_perm (4 samples, 1.00%)</title><rect x="1920.7" y="637" width="19.8" height="19.0" fill="rgb(252,155,42)" rx="2" ry="2" />
+<text  x="1923.70" y="649.5" ></text>
+</g>
+<g >
+<title>prepare_ftrace_return (9 samples, 2.25%)</title><rect x="980.2" y="637" width="44.6" height="19.0" fill="rgb(240,80,7)" rx="2" ry="2" />
+<text  x="983.20" y="649.5" >prep..</text>
+</g>
+<g >
+<title>_raw_spin_lock_irqsave (9 samples, 2.25%)</title><rect x="569.4" y="637" width="44.5" height="19.0" fill="rgb(209,141,41)" rx="2" ry="2" />
+<text  x="572.35" y="649.5" >_raw..</text>
+</g>
+<g >
+<title>ftrace_graph_caller (11 samples, 2.75%)</title><rect x="628.8" y="617" width="54.4" height="19.0" fill="rgb(228,90,37)" rx="2" ry="2" />
+<text  x="631.75" y="629.5" >ftrac..</text>
+</g>
+<g >
+<title>__es_tree_search (1 samples, 0.25%)</title><rect x="1366.3" y="517" width="4.9" height="19.0" fill="rgb(235,92,20)" rx="2" ry="2" />
+<text  x="1369.30" y="529.5" ></text>
+</g>
+<g >
+<title>__indirect_thunk_start (1 samples, 0.25%)</title><rect x="1722.7" y="437" width="5.0" height="19.0" fill="rgb(247,98,53)" rx="2" ry="2" />
+<text  x="1725.70" y="449.5" ></text>
+</g>
+<g >
+<title>prepare_ftrace_return (2 samples, 0.50%)</title><rect x="1574.2" y="437" width="9.9" height="19.0" fill="rgb(241,163,48)" rx="2" ry="2" />
+<text  x="1577.20" y="449.5" ></text>
+</g>
+<g >
+<title>trace_clock_local (1 samples, 0.25%)</title><rect x="1371.2" y="497" width="5.0" height="19.0" fill="rgb(247,56,33)" rx="2" ry="2" />
+<text  x="1374.25" y="509.5" ></text>
+</g>
+<g >
+<title>prepare_ftrace_return (1 samples, 0.25%)</title><rect x="1371.2" y="537" width="5.0" height="19.0" fill="rgb(213,143,1)" rx="2" ry="2" />
+<text  x="1374.25" y="549.5" ></text>
+</g>
+<g >
+<title>ftrace_graph_caller (2 samples, 0.50%)</title><rect x="1306.9" y="517" width="9.9" height="19.0" fill="rgb(245,205,26)" rx="2" ry="2" />
+<text  x="1309.90" y="529.5" ></text>
+</g>
+<g >
+<title>ftrace_graph_caller (2 samples, 0.50%)</title><rect x="1886.0" y="657" width="10.0" height="19.0" fill="rgb(230,103,24)" rx="2" ry="2" />
+<text  x="1889.05" y="669.5" ></text>
+</g>
+<g >
+<title>function_graph_enter (1 samples, 0.25%)</title><rect x="1519.8" y="557" width="4.9" height="19.0" fill="rgb(251,108,31)" rx="2" ry="2" />
+<text  x="1522.75" y="569.5" ></text>
+</g>
+<g >
+<title>prepare_ftrace_return (1 samples, 0.25%)</title><rect x="1331.7" y="517" width="4.9" height="19.0" fill="rgb(224,158,20)" rx="2" ry="2" />
+<text  x="1334.65" y="529.5" ></text>
+</g>
+<g >
+<title>sched_clock (1 samples, 0.25%)</title><rect x="123.9" y="617" width="4.9" height="19.0" fill="rgb(225,138,38)" rx="2" ry="2" />
+<text  x="126.85" y="629.5" ></text>
+</g>
+<g >
+<title>ftrace_graph_caller (1 samples, 0.25%)</title><rect x="1084.2" y="637" width="4.9" height="19.0" fill="rgb(222,189,44)" rx="2" ry="2" />
+<text  x="1087.15" y="649.5" ></text>
+</g>
+<g >
+<title>ftrace_graph_caller (2 samples, 0.50%)</title><rect x="1237.6" y="597" width="9.9" height="19.0" fill="rgb(226,30,38)" rx="2" ry="2" />
+<text  x="1240.60" y="609.5" ></text>
+</g>
+<g >
+<title>__page_cache_alloc (4 samples, 1.00%)</title><rect x="1386.1" y="557" width="19.8" height="19.0" fill="rgb(246,134,38)" rx="2" ry="2" />
+<text  x="1389.10" y="569.5" ></text>
+</g>
+<g >
+<title>sched_clock (2 samples, 0.50%)</title><rect x="1757.4" y="377" width="9.8" height="19.0" fill="rgb(208,81,1)" rx="2" ry="2" />
+<text  x="1760.35" y="389.5" ></text>
+</g>
+<g >
+<title>sched_clock (1 samples, 0.25%)</title><rect x="1945.5" y="577" width="4.9" height="19.0" fill="rgb(210,4,33)" rx="2" ry="2" />
+<text  x="1948.45" y="589.5" ></text>
+</g>
+<g >
+<title>ftrace_graph_caller (1 samples, 0.25%)</title><rect x="1321.8" y="517" width="4.9" height="19.0" fill="rgb(205,153,36)" rx="2" ry="2" />
+<text  x="1324.75" y="529.5" ></text>
+</g>
+<g >
+<title>function_graph_enter (1 samples, 0.25%)</title><rect x="1356.4" y="437" width="5.0" height="19.0" fill="rgb(251,21,50)" rx="2" ry="2" />
+<text  x="1359.40" y="449.5" ></text>
+</g>
+<g >
+<title>ftrace_lookup_ip (1 samples, 0.25%)</title><rect x="24.9" y="397" width="4.9" height="19.0" fill="rgb(214,168,33)" rx="2" ry="2" />
+<text  x="27.85" y="409.5" ></text>
+</g>
+<g >
+<title>ext4_alloc_da_blocks (8 samples, 2.00%)</title><rect x="10.0" y="637" width="39.6" height="19.0" fill="rgb(219,170,19)" rx="2" ry="2" />
+<text  x="13.00" y="649.5" >ext..</text>
+</g>
+<g >
+<title>do_IRQ (1 samples, 0.25%)</title><rect x="39.7" y="357" width="4.9" height="19.0" fill="rgb(208,99,35)" rx="2" ry="2" />
+<text  x="42.70" y="369.5" ></text>
+</g>
+<g >
+<title>ftrace_graph_caller (2 samples, 0.50%)</title><rect x="1787.0" y="457" width="10.0" height="19.0" fill="rgb(239,143,50)" rx="2" ry="2" />
+<text  x="1790.05" y="469.5" ></text>
+</g>
+<g >
+<title>trace_clock_local (1 samples, 0.25%)</title><rect x="1123.8" y="657" width="4.9" height="19.0" fill="rgb(252,183,53)" rx="2" ry="2" />
+<text  x="1126.75" y="669.5" ></text>
+</g>
+<g >
+<title>ftrace_graph_is_dead (1 samples, 0.25%)</title><rect x="633.7" y="597" width="4.9" height="19.0" fill="rgb(218,152,16)" rx="2" ry="2" />
+<text  x="636.70" y="609.5" ></text>
+</g>
+<g >
+<title>function_graph_enter (1 samples, 0.25%)</title><rect x="14.9" y="437" width="5.0" height="19.0" fill="rgb(247,73,3)" rx="2" ry="2" />
+<text  x="17.95" y="449.5" ></text>
+</g>
+<g >
+<title>ftrace_graph_caller (1 samples, 0.25%)</title><rect x="1128.7" y="737" width="5.0" height="19.0" fill="rgb(215,4,28)" rx="2" ry="2" />
+<text  x="1131.70" y="749.5" ></text>
+</g>
+<g >
+<title>__filemap_fdatawrite_range (8 samples, 2.00%)</title><rect x="10.0" y="597" width="39.6" height="19.0" fill="rgb(216,67,10)" rx="2" ry="2" />
+<text  x="13.00" y="609.5" >__f..</text>
+</g>
+<g >
+<title>trace_graph_entry (1 samples, 0.25%)</title><rect x="118.9" y="617" width="5.0" height="19.0" fill="rgb(218,124,29)" rx="2" ry="2" />
+<text  x="121.90" y="629.5" ></text>
+</g>
+<g >
+<title>function_graph_enter (1 samples, 0.25%)</title><rect x="1133.7" y="657" width="4.9" height="19.0" fill="rgb(247,31,42)" rx="2" ry="2" />
+<text  x="1136.65" y="669.5" ></text>
+</g>
+<g >
+<title>jbd2_journal_dirty_metadata (1 samples, 0.25%)</title><rect x="1603.9" y="457" width="5.0" height="19.0" fill="rgb(223,158,24)" rx="2" ry="2" />
+<text  x="1606.90" y="469.5" ></text>
+</g>
+<g >
+<title>prepare_ftrace_return (2 samples, 0.50%)</title><rect x="1445.5" y="537" width="9.9" height="19.0" fill="rgb(213,137,33)" rx="2" ry="2" />
+<text  x="1448.50" y="549.5" ></text>
+</g>
+<g >
+<title>function_graph_enter (1 samples, 0.25%)</title><rect x="118.9" y="637" width="5.0" height="19.0" fill="rgb(224,4,0)" rx="2" ry="2" />
+<text  x="121.90" y="649.5" ></text>
+</g>
+<g >
+<title>ext4_release_file (8 samples, 2.00%)</title><rect x="10.0" y="657" width="39.6" height="19.0" fill="rgb(227,178,16)" rx="2" ry="2" />
+<text  x="13.00" y="669.5" >ext..</text>
+</g>
+<g >
+<title>function_graph_enter (1 samples, 0.25%)</title><rect x="1252.5" y="517" width="4.9" height="19.0" fill="rgb(210,178,44)" rx="2" ry="2" />
+<text  x="1255.45" y="529.5" ></text>
+</g>
+<g >
+<title>ext4_journal_check_start (2 samples, 0.50%)</title><rect x="1247.5" y="577" width="9.9" height="19.0" fill="rgb(208,224,37)" rx="2" ry="2" />
+<text  x="1250.50" y="589.5" ></text>
+</g>
+<g >
+<title>ftrace_graph_caller (1 samples, 0.25%)</title><rect x="1727.7" y="437" width="4.9" height="19.0" fill="rgb(222,223,9)" rx="2" ry="2" />
+<text  x="1730.65" y="449.5" ></text>
+</g>
+<g >
+<title>exit_to_usermode_loop (8 samples, 2.00%)</title><rect x="10.0" y="737" width="39.6" height="19.0" fill="rgb(210,123,18)" rx="2" ry="2" />
+<text  x="13.00" y="749.5" >exi..</text>
+</g>
+<g >
+<title>ftrace_graph_caller (1 samples, 0.25%)</title><rect x="1950.4" y="677" width="5.0" height="19.0" fill="rgb(207,76,24)" rx="2" ry="2" />
+<text  x="1953.40" y="689.5" ></text>
+</g>
+<g >
+<title>__set_page_dirty (2 samples, 0.50%)</title><rect x="1836.5" y="517" width="10.0" height="19.0" fill="rgb(253,176,4)" rx="2" ry="2" />
+<text  x="1839.55" y="529.5" ></text>
+</g>
+<g >
+<title>prepare_ftrace_return (1 samples, 0.25%)</title><rect x="1915.8" y="677" width="4.9" height="19.0" fill="rgb(239,6,12)" rx="2" ry="2" />
+<text  x="1918.75" y="689.5" ></text>
+</g>
+<g >
+<title>ftrace_graph_caller (1 samples, 0.25%)</title><rect x="49.6" y="517" width="5.0" height="19.0" fill="rgb(247,96,12)" rx="2" ry="2" />
+<text  x="52.60" y="529.5" ></text>
+</g>
+<g >
+<title>function_graph_enter (1 samples, 0.25%)</title><rect x="1554.4" y="457" width="5.0" height="19.0" fill="rgb(209,39,1)" rx="2" ry="2" />
+<text  x="1557.40" y="469.5" ></text>
+</g>
+<g >
+<title>ftrace_graph_caller (1 samples, 0.25%)</title><rect x="1049.5" y="717" width="5.0" height="19.0" fill="rgb(215,152,28)" rx="2" ry="2" />
+<text  x="1052.50" y="729.5" ></text>
+</g>
+<g >
+<title>from_kprojid (3 samples, 0.75%)</title><rect x="1698.0" y="477" width="14.8" height="19.0" fill="rgb(209,143,23)" rx="2" ry="2" />
+<text  x="1700.95" y="489.5" ></text>
+</g>
+<g >
+<title>prepare_ftrace_return (1 samples, 0.25%)</title><rect x="1896.0" y="617" width="4.9" height="19.0" fill="rgb(240,162,41)" rx="2" ry="2" />
+<text  x="1898.95" y="629.5" ></text>
+</g>
+<g >
+<title>_cond_resched (2 samples, 0.50%)</title><rect x="1554.4" y="517" width="9.9" height="19.0" fill="rgb(250,187,51)" rx="2" ry="2" />
+<text  x="1557.40" y="529.5" ></text>
+</g>
+<g >
+<title>prepare_ftrace_return (2 samples, 0.50%)</title><rect x="104.0" y="717" width="10.0" height="19.0" fill="rgb(208,197,20)" rx="2" ry="2" />
+<text  x="107.05" y="729.5" ></text>
+</g>
+<g >
+<title>timespec_trunc (2 samples, 0.50%)</title><rect x="1173.2" y="597" width="10.0" height="19.0" fill="rgb(238,123,52)" rx="2" ry="2" />
+<text  x="1176.25" y="609.5" ></text>
+</g>
+<g >
+<title>ftrace_graph_caller (3 samples, 0.75%)</title><rect x="1480.2" y="497" width="14.8" height="19.0" fill="rgb(213,49,28)" rx="2" ry="2" />
+<text  x="1483.15" y="509.5" ></text>
+</g>
+<g >
+<title>trace_graph_entry (1 samples, 0.25%)</title><rect x="1262.4" y="497" width="4.9" height="19.0" fill="rgb(248,45,48)" rx="2" ry="2" />
+<text  x="1265.35" y="509.5" ></text>
+</g>
+<g >
+<title>ftrace_graph_caller (2 samples, 0.50%)</title><rect x="1846.5" y="557" width="9.9" height="19.0" fill="rgb(226,125,19)" rx="2" ry="2" />
+<text  x="1849.45" y="569.5" ></text>
+</g>
+<g >
+<title>prepare_ftrace_return (1 samples, 0.25%)</title><rect x="1079.2" y="597" width="5.0" height="19.0" fill="rgb(223,129,52)" rx="2" ry="2" />
+<text  x="1082.20" y="609.5" ></text>
+</g>
+<g >
+<title>prepare_ftrace_return (1 samples, 0.25%)</title><rect x="1797.0" y="417" width="4.9" height="19.0" fill="rgb(215,159,19)" rx="2" ry="2" />
+<text  x="1799.95" y="429.5" ></text>
+</g>
+<g >
+<title>function_graph_enter (1 samples, 0.25%)</title><rect x="1331.7" y="497" width="4.9" height="19.0" fill="rgb(205,87,4)" rx="2" ry="2" />
+<text  x="1334.65" y="509.5" ></text>
+</g>
+<g >
+<title>function_graph_enter (1 samples, 0.25%)</title><rect x="1376.2" y="497" width="5.0" height="19.0" fill="rgb(237,162,29)" rx="2" ry="2" />
+<text  x="1379.20" y="509.5" ></text>
+</g>
+<g >
+<title>ftrace_graph_caller (1 samples, 0.25%)</title><rect x="1331.7" y="537" width="4.9" height="19.0" fill="rgb(236,58,34)" rx="2" ry="2" />
+<text  x="1334.65" y="549.5" ></text>
+</g>
+<g >
+<title>ftrace_graph_caller (1 samples, 0.25%)</title><rect x="1861.3" y="577" width="4.9" height="19.0" fill="rgb(254,30,8)" rx="2" ry="2" />
+<text  x="1864.30" y="589.5" ></text>
+</g>
+<g >
+<title>prepare_ftrace_return (1 samples, 0.25%)</title><rect x="1084.2" y="617" width="4.9" height="19.0" fill="rgb(228,51,3)" rx="2" ry="2" />
+<text  x="1087.15" y="629.5" ></text>
+</g>
+<g >
+<title>ext4_mark_iloc_dirty (32 samples, 8.00%)</title><rect x="1569.2" y="517" width="158.5" height="19.0" fill="rgb(213,65,12)" rx="2" ry="2" />
+<text  x="1572.25" y="529.5" >ext4_mark_iloc_dirty</text>
+</g>
+<g >
+<title>sched_clock (1 samples, 0.25%)</title><rect x="178.3" y="557" width="4.9" height="19.0" fill="rgb(240,216,5)" rx="2" ry="2" />
+<text  x="181.30" y="569.5" ></text>
+</g>
+<g >
+<title>native_sched_clock (1 samples, 0.25%)</title><rect x="19.9" y="377" width="5.0" height="19.0" fill="rgb(217,112,54)" rx="2" ry="2" />
+<text  x="22.90" y="389.5" ></text>
+</g>
+<g >
+<title>account_page_dirtied (2 samples, 0.50%)</title><rect x="1836.5" y="497" width="10.0" height="19.0" fill="rgb(223,177,44)" rx="2" ry="2" />
+<text  x="1839.55" y="509.5" ></text>
+</g>
+<g >
+<title>ext4_file_getattr (1 samples, 0.25%)</title><rect x="1960.3" y="717" width="4.9" height="19.0" fill="rgb(218,214,20)" rx="2" ry="2" />
+<text  x="1963.30" y="729.5" ></text>
+</g>
+<g >
+<title>ftrace_graph_caller (1 samples, 0.25%)</title><rect x="1361.4" y="497" width="4.9" height="19.0" fill="rgb(233,184,13)" rx="2" ry="2" />
+<text  x="1364.35" y="509.5" ></text>
+</g>
+<g >
+<title>ftrace_graph_caller (1 samples, 0.25%)</title><rect x="1915.8" y="697" width="4.9" height="19.0" fill="rgb(239,174,33)" rx="2" ry="2" />
+<text  x="1918.75" y="709.5" ></text>
+</g>
+<g >
+<title>prepare_ftrace_return (1 samples, 0.25%)</title><rect x="1356.4" y="457" width="5.0" height="19.0" fill="rgb(235,22,53)" rx="2" ry="2" />
+<text  x="1359.40" y="469.5" ></text>
+</g>
+<g >
+<title>prepare_ftrace_return (2 samples, 0.50%)</title><rect x="1589.0" y="397" width="10.0" height="19.0" fill="rgb(231,132,8)" rx="2" ry="2" />
+<text  x="1592.05" y="409.5" ></text>
+</g>
+<g >
+<title>try_charge (1 samples, 0.25%)</title><rect x="1430.7" y="497" width="4.9" height="19.0" fill="rgb(207,130,34)" rx="2" ry="2" />
+<text  x="1433.65" y="509.5" ></text>
+</g>
+<g >
+<title>prepare_ftrace_return (1 samples, 0.25%)</title><rect x="1905.9" y="697" width="4.9" height="19.0" fill="rgb(239,227,30)" rx="2" ry="2" />
+<text  x="1908.85" y="709.5" ></text>
+</g>
+<g >
+<title>function_graph_enter (1 samples, 0.25%)</title><rect x="24.9" y="417" width="4.9" height="19.0" fill="rgb(250,51,4)" rx="2" ry="2" />
+<text  x="27.85" y="429.5" ></text>
+</g>
+<g >
+<title>ftrace_graph_caller (3 samples, 0.75%)</title><rect x="361.4" y="657" width="14.9" height="19.0" fill="rgb(210,60,47)" rx="2" ry="2" />
+<text  x="364.45" y="669.5" ></text>
+</g>
+<g >
+<title>do_truncate (1 samples, 0.25%)</title><rect x="49.6" y="657" width="5.0" height="19.0" fill="rgb(228,77,54)" rx="2" ry="2" />
+<text  x="52.60" y="669.5" ></text>
+</g>
+<g >
+<title>ftrace_lookup_ip (3 samples, 0.75%)</title><rect x="950.5" y="557" width="14.9" height="19.0" fill="rgb(216,222,6)" rx="2" ry="2" />
+<text  x="953.50" y="569.5" ></text>
+</g>
+<g >
+<title>down_write_trylock (1 samples, 0.25%)</title><rect x="1876.2" y="657" width="4.9" height="19.0" fill="rgb(238,58,3)" rx="2" ry="2" />
+<text  x="1879.15" y="669.5" ></text>
+</g>
+<g >
+<title>trace_graph_entry (1 samples, 0.25%)</title><rect x="1381.2" y="517" width="4.9" height="19.0" fill="rgb(215,78,37)" rx="2" ry="2" />
+<text  x="1384.15" y="529.5" ></text>
+</g>
+<g >
+<title>function_graph_enter (1 samples, 0.25%)</title><rect x="1341.5" y="517" width="5.0" height="19.0" fill="rgb(252,80,4)" rx="2" ry="2" />
+<text  x="1344.55" y="529.5" ></text>
+</g>
+<g >
+<title>ftrace_graph_caller (1 samples, 0.25%)</title><rect x="1425.7" y="497" width="5.0" height="19.0" fill="rgb(254,77,6)" rx="2" ry="2" />
+<text  x="1428.70" y="509.5" ></text>
+</g>
+<g >
+<title>truncate_inode_pages_range (1 samples, 0.25%)</title><rect x="49.6" y="577" width="5.0" height="19.0" fill="rgb(225,77,16)" rx="2" ry="2" />
+<text  x="52.60" y="589.5" ></text>
+</g>
+<g >
+<title>__ext4_get_inode_loc (9 samples, 2.25%)</title><rect x="1727.7" y="497" width="44.5" height="19.0" fill="rgb(252,5,51)" rx="2" ry="2" />
+<text  x="1730.65" y="509.5" >__ex..</text>
+</g>
+<g >
+<title>function_graph_enter (1 samples, 0.25%)</title><rect x="1381.2" y="537" width="4.9" height="19.0" fill="rgb(242,178,14)" rx="2" ry="2" />
+<text  x="1384.15" y="549.5" ></text>
+</g>
+<g >
+<title>sched_clock (1 samples, 0.25%)</title><rect x="1514.8" y="477" width="5.0" height="19.0" fill="rgb(213,155,4)" rx="2" ry="2" />
+<text  x="1517.80" y="489.5" ></text>
+</g>
+<g >
+<title>ftrace_graph_caller (1 samples, 0.25%)</title><rect x="1470.2" y="497" width="5.0" height="19.0" fill="rgb(205,204,16)" rx="2" ry="2" />
+<text  x="1473.25" y="509.5" ></text>
+</g>
+<g >
+<title>prepare_ftrace_return (1 samples, 0.25%)</title><rect x="1460.4" y="557" width="4.9" height="19.0" fill="rgb(247,221,32)" rx="2" ry="2" />
+<text  x="1463.35" y="569.5" ></text>
+</g>
+<g >
+<title>function_graph_enter (8 samples, 2.00%)</title><rect x="985.2" y="617" width="39.6" height="19.0" fill="rgb(217,34,7)" rx="2" ry="2" />
+<text  x="988.15" y="629.5" >fun..</text>
+</g>
+<g >
+<title>native_sched_clock (1 samples, 0.25%)</title><rect x="1628.7" y="317" width="4.9" height="19.0" fill="rgb(234,106,40)" rx="2" ry="2" />
+<text  x="1631.65" y="329.5" ></text>
+</g>
+<g >
+<title>ftrace_lookup_ip (1 samples, 0.25%)</title><rect x="1262.4" y="477" width="4.9" height="19.0" fill="rgb(237,122,40)" rx="2" ry="2" />
+<text  x="1265.35" y="489.5" ></text>
+</g>
+<g >
+<title>ext4_journal_check_start (4 samples, 1.00%)</title><rect x="1524.7" y="517" width="19.8" height="19.0" fill="rgb(253,2,2)" rx="2" ry="2" />
+<text  x="1527.70" y="529.5" ></text>
+</g>
+<g >
+<title>ftrace_graph_caller (1 samples, 0.25%)</title><rect x="1801.9" y="497" width="5.0" height="19.0" fill="rgb(209,159,1)" rx="2" ry="2" />
+<text  x="1804.90" y="509.5" ></text>
+</g>
+<g >
+<title>__ext4_journal_stop (12 samples, 3.00%)</title><rect x="1460.4" y="597" width="59.4" height="19.0" fill="rgb(223,97,33)" rx="2" ry="2" />
+<text  x="1463.35" y="609.5" >__ext4..</text>
+</g>
+<g >
+<title>trace_graph_entry (1 samples, 0.25%)</title><rect x="1361.4" y="457" width="4.9" height="19.0" fill="rgb(221,183,24)" rx="2" ry="2" />
+<text  x="1364.35" y="469.5" ></text>
+</g>
+<g >
+<title>prepare_ftrace_return (1 samples, 0.25%)</title><rect x="1366.3" y="477" width="4.9" height="19.0" fill="rgb(226,147,16)" rx="2" ry="2" />
+<text  x="1369.30" y="489.5" ></text>
+</g>
+<g >
+<title>native_sched_clock (1 samples, 0.25%)</title><rect x="1420.8" y="417" width="4.9" height="19.0" fill="rgb(241,15,10)" rx="2" ry="2" />
+<text  x="1423.75" y="429.5" ></text>
+</g>
+<g >
+<title>prepare_ftrace_return (1 samples, 0.25%)</title><rect x="1945.5" y="637" width="4.9" height="19.0" fill="rgb(252,210,34)" rx="2" ry="2" />
+<text  x="1948.45" y="649.5" ></text>
+</g>
+</g>
+</svg>

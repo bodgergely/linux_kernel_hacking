@@ -72,4 +72,66 @@ The work item's function should be trivially visible in the stack
 trace.
 
 
+Block I/O layer (mostly from the Rober Love book)
+===============
+
+Types:
+    - Character
+    - Block
+
+Char devs access a stream of sequential data, one byte after the another.
+E.g: serial ports, keyboards
+If a hardware dev is implemented as a stream of data -> it is a char dev.
+
+Block device accesses data randomly (non-sequenctially) NOT as a stream.
+E.g: hard drive
+
+Char dev is much simpler as only the current pos in the stream needs to be
+looked at. 
+
+Entire subsystem is dedicated to block devices. (char devs do not get their own)
+This subsystem is called the Block I/O Layer.
+
+Block device
+------------
+
+- Smallest addressable unit is the `sector`. 512 bytes for a sector is the most common
+size.
+The device cannot address or operate on a unit smaller than the sector, 
+although many block devices can operate on multiple sectors at one time.
+
+In software world it is called a `block`. The smallest addressable unit.
+The `block` is an abstraction of the filesystem, filesystems can be accessed
+only in multiple of a block. Although the physical device is addressable at the
+sector level, the kernel performs all disk operations in terms of blocks.
+Block cannot be larger than the page size. 
+Therefore, block sizes are a power-of-two multiple of the sector size and
+are not greater than the page size. Common block sizes are 512 bytes, 1 kilobyte, and 4
+kilobytes.
+
+`sector` vs `block`: sector is the hardware unit, block is the software unit of filesystem.
+`block` is an abstarction built on sectors.
+
+
+Buffers
+-------
+
+Pending writes/reads are stored in buffers. Buffers are associated with blocks. Block is 
+composed of one or more sectors.
+
+`struct buffer_head` describes the buffer in <linux/buffer_head.h>.
+
+Nowadays the basic I/O unit is the `struct bio` in <linux/blk_types.h>.
+
+
+
+
+
+Kernel tuning
+=============
+
+https://www.linuxtopia.org/online_books/linux_kernel/kernel_configuration/ch09s03.html
+
+CONFIG_PREEMPT - for low latency
+it is usually not set for desktops CONFIG_PREEMTP_VOLUNTARY
 

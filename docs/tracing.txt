@@ -4,6 +4,20 @@ Kernel Tracing
 /sys/kernel/debug/tracing
 -------------------------
 
+See: Documentation/trace/ftrace.rst
+
+$ cat available_tracers
+hwlat blk mmiotrace function_graph wakeup_dl wakeup_rt wakeup function nop
+
+$ echo function_graph > current_tracer
+
+$ cat available_filter_functions | grep vfs_write
+$ echo vfs_write > set_graph_function
+$ echo 1 > tracing_on
+$ cat trace         # disables tracing while reading this file
+$ cat trace_pipe    # does not disable, stream based
+$ echo 0 > tracing_on
+
 You can trace events that are named by TRACE_EVENT macro.
 
 Trace an event:

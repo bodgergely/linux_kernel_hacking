@@ -1,1 +1,5 @@
 *.ko
+**.ko
+**.o
+**.mod.c
+**/Module.symvers

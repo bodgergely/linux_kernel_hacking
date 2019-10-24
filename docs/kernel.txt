@@ -133,6 +133,17 @@ Page Cache
 Links:
 https://www.thomas-krenn.com/en/wiki/Linux_Page_Cache_Basics
 
+Utils:
+- free - Display amount of free and used memory in the system
+$ free -m
+             total        used        free      shared  buff/cache   available
+Mem:         15638        3399        4397         613        7840       11395
+Swap:         2047           0        2047
+
+
+Force page cache clearing:
+$ echo 1 > /proc/sys/vm/drop_caches
+
 
 
 Kernel tuning

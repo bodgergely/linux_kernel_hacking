@@ -32,3 +32,7 @@ static void __exit exitmodule(void ){
 module_init( initmodule );
 module_exit( exitmodule );
 
+MODULE_LICENSE("GPL");
+MODULE_AUTHOR("Gergely Bod");
+MODULE_DESCRIPTION("A Hello World Module");
+

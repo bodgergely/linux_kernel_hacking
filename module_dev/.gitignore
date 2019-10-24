@@ -1,5 +1,9 @@
 *.ko
 **.ko
 **.o
+**.cmd
+**.cache.mk
+**.tmp_versions/
 **.mod.c
 **/Module.symvers
+**/modules.order

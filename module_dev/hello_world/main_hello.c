@@ -11,7 +11,12 @@
 
 static void printk_test(void)
 {
-    printk("Hello World!\n");    
+    printk(KERN_INFO "Hello World!\n");    
+}
+
+static void goodbye(void)
+{
+    printk(KERN_INFO "Goodbye from Hello World module!\n");
 }
 
 static int __init initmodule(void ){
@@ -20,6 +25,7 @@ static int __init initmodule(void ){
 }
 
 static void __exit exitmodule(void ){
+    goodbye();
 	return;
 }
 

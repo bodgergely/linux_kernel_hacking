@@ -21,7 +21,7 @@ static void goodbye(void)
 
 static int __init initmodule(void ){
     printk_test();
-    return 0;
+    return 0;       // must return 0 on success and nonzero on failure
 }
 
 static void __exit exitmodule(void ){

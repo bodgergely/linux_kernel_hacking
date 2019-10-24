@@ -133,6 +133,8 @@ Page Cache
 Links:
 https://www.thomas-krenn.com/en/wiki/Linux_Page_Cache_Basics
 
+$ ls /proc/sys/vm
+
 Utils:
 - free - Display amount of free and used memory in the system
 $ free -m
@@ -143,6 +145,15 @@ Swap:         2047           0        2047
 
 Force page cache clearing:
 $ echo 1 > /proc/sys/vm/drop_caches
+
+Tuning VM parameters:
+$ sysctl vm.*
+$ sysctl vm.dirty_writeback_centisecs
+
+[writeback] kernel thread writes back dirty pages periodically or when
+a certain ratio of memory gets dirty and we need to free up some.
+This kernel thread is set up in mm/backing-dev.c in function:
+subsys_initcall(default_bdi_init);
 
 
 

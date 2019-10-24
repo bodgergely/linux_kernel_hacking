@@ -127,6 +127,14 @@ Nowadays the basic I/O unit is the `struct bio` in <linux/blk_types.h>.
 
 
 
+Page Cache
+==========
+
+Links:
+https://www.thomas-krenn.com/en/wiki/Linux_Page_Cache_Basics
+
+
+
 Kernel tuning
 =============
 

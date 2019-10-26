@@ -11,7 +11,18 @@ Proc filesystem:
 http://tldp.org/LDP/Linux-Filesystem-Hierarchy/html/proc.html
 
 
+vmlinux,vmlinuz
+===============
+sudo apt-get install linux-headers-$(uname -r)
 
+vmlinuz = compressed kernel image
+vmlinux = decompressed kernel image
+
+
+mkdir /tmp/kernel-extract
+sudo cp /boot/vmlinuz-$(uname -r) /tmp/kernel-extract/
+cd /tmp/kernel-extract/
+sudo /usr/src/linux-headers-$(uname -r)/scripts/extract-vmlinux vmlinuz-$(uname -r) > vmlinux
 
 
 Softirq

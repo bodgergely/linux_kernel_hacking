@@ -68,11 +68,15 @@ is its actual runtime normalized to the total number of running tasks.
 Task picking logic
 ------------------
 
-CFS's task picking logic is based on this **p->se.vruntime** value and it is thus
-very simple: it always tries to run the task with the smallest p->se.vruntime
-value (i.e., the task which executed least so far).  CFS always tries to split
-up CPU time between runnable tasks as close to "ideal multitasking hardware" as
-possible.
+**************************************************************************************
+*                                                                                    *
+* CFS's task picking logic is based on this **p->se.vruntime** value and it is thus  *
+* very simple: it always tries to run the task with the smallest p->se.vruntime      *
+* value (i.e., the task which executed least so far).  CFS always tries to split     *
+* up CPU time between runnable tasks as close to "ideal multitasking hardware" as    *
+* possible.                                                                          *
+*                                                                                    *
+**************************************************************************************
 
 
 Summing up, CFS works like this: it runs a task a bit, and when the task

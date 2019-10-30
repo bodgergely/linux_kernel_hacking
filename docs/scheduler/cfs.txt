@@ -164,10 +164,27 @@ hrtimer.c
 
 
 
+Load Balancing
+==============
 
+Documentation/cgroup-v1/cpusets.txt
+man 7 cpuset
 
+fair.c
+cpuset.c
 
+idle_balance()
+nohz_newidle_balance()
+load_balance()
 
+Patches
+-------
+https://lkml.org/lkml/2019/9/19/92
+https://lkml.org/lkml/2018/12/6/1253
+
+Links
+-----
+https://hal.archives-ouvertes.fr/hal-01295194/document
 
 
 

@@ -1,0 +1,6 @@
+Resources
+---------
+
+https://www.labbott.name/blog/2015/12/15/grabbing-kernel-patches-from-mailing-lists-and-the-internet/
+https://home.regit.org/technical-articles/git-for-the-newbie/
+https://www.youtube.com/watch?v=6zUVS4kJtrA         - GK Hartman shows how to apply patches 

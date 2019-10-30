@@ -1,3 +1,11 @@
+Applying patches
+----------------
+
+Copy the patch to a file.
+$ cd ~/workspace/linux
+$ patch -p1 < /tmp/patches/baba.patch
+
+
 Patchwork
 ----------
 Grab patches from here:

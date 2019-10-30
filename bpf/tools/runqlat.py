@@ -204,7 +204,9 @@ RAW_TRACEPOINT_PROBE(sched_switch)
 is_support_raw_tp = BPF.support_raw_tracepoint()
 if is_support_raw_tp:
     bpf_text += bpf_text_raw_tp
+    print("Supporting raw tracepoint!")
 else:
+    print("Using kprobe because no support for raw tracepoint!")
     bpf_text += bpf_text_kprobe
 
 # code substitutions

@@ -7,7 +7,7 @@ Links:
 ------
 
 https://blog.shichao.io/2015/07/22/relationships_among_nice_priority_and_weight_in_linux_kernel.html
-
+https://lwn.net/Articles/639543/
 
 Man page
 --------
@@ -67,6 +67,12 @@ is its actual runtime normalized to the total number of running tasks.
 
 Task picking logic
 ------------------
+
+How does the scheduler decide which task to pick? The tasks are arranged in a red-black
+tree in increasing order of the amount of time that they have spent running on the CPU 
+which is accumulated in a variable called **vruntime**. The lowest vruntime found in the 
+queue is stored in `cfs_rq.min_vruntime`.
+
 
 **************************************************************************************
 *                                                                                    *
@@ -167,33 +173,444 @@ hrtimer.c
 Load Balancing
 ==============
 
+kernel/sched/fair.c line 6805 describes Fair scheduling class load-balancing methods!!
+READ IT!!!!
+
+Scheduling periods and time slices
+----------------------------------
+
+There is the **scheduling period** time duration during which every runnnable task
+on the CPU should run at least once.
+This way no task gets starved for longer than a scheduling period.
+The scheduling period is divided among the tasks into **time slices**, 
+which are the *maximum amount of time* that a task runs within a scheduling period 
+before it gets preempted.
+
+Caveat:
+TLDR: Distribute the time slices to group of tasks (cgroups) so that it is fair among users/groups.
+
+Linux is a multi-user operating system. Consider a scenario where user A spawns ten tasks and user B spawns five. Using the above approach, every task would get ~7% of the available CPU time within a scheduling period. 
+So user A gets 67% and user B gets 33% of the CPU time during their runs. Clearly, if user A continues to
+spawn more tasks, he can starve user B of even more CPU time. To address this problem, the concept 
+of "group scheduling" was introduced in the scheduler, where, instead of dividing the CPU time among tasks, 
+it is divided among **groups of tasks**.
+
+
+Sched domains - balancing
+-------------
+
+#######################################################################################
+
+In kernel/sched/core.c, trigger_load_balance() is run periodically on each CPU
+through scheduler_tick(). It raises a softirq after the next regularly scheduled
+rebalancing event for the current runqueue has arrived. The actual load
+balancing **workhorse**, run_rebalance_domains()->rebalance_domains(), is then run
+in softirq context (SCHED_SOFTIRQ).
+
+#######################################################################################
+
+Trace:
+            run_rebalance_domains()
+                update_cfs_rq_load_avg()
+                    __update_load_avg_cfs_rq()
+                        __accumulate_pelt_segments()
+
+
+
+7)               |    rebalance_domains() {
+7)   0.851 us    |      __msecs_to_jiffies();
+7)               |      load_balance() {
+7)   0.929 us    |        idle_cpu();
+7)               |        find_busiest_group() {
+7)               |          update_group_capacity() {
+7)   0.859 us    |            __msecs_to_jiffies();
+7)   2.614 us    |          }
+7)   0.620 us    |          idle_cpu();
+7)   7.900 us    |        }
+7) + 13.189 us   |      }
+7)   0.901 us    |      __msecs_to_jiffies();
+7)   0.891 us    |      __msecs_to_jiffies();
+7) + 20.973 us   |    }
+7) ! 267.129 us  |  }
+
+                        load_balance() {
+ 7)   1.022 us    |      __update_load_avg_se();
+ 4)   0.887 us    |        idle_cpu();
+ 7)   0.944 us    |      __update_load_avg_cfs_rq();
+ 4)   0.919 us    |        idle_cpu();
+ 7)               |      __update_load_avg_cfs_rq() {
+ 4)               |        find_busiest_group() {
+ 7)   0.886 us    |        __accumulate_pelt_segments();
+ 4)               |          update_group_capacity() {
+ 4)   0.863 us    |            __msecs_to_jiffies();
+ 7)   2.733 us    |      }
+ 7)   0.892 us    |      __update_load_avg_cfs_rq();
+ 4)   2.713 us    |          }
+ 4)   0.898 us    |          idle_cpu();
+ 7)               |      update_rt_rq_load_avg() {
+ 4)   0.951 us    |          idle_cpu();
+ 7)   0.910 us    |        __accumulate_pelt_segments();
+ 7)   3.472 us    |      }
+
+
+Kernel files:
+-------------
 Documentation/cgroup-v1/cpusets.txt
+Documentation/scheduler/sched-domains.rst
 man 7 cpuset
 
 fair.c
 cpuset.c
+pelt.c  - Per Entity Load Tracking
 
+Functions:
+----------
 idle_balance()
 nohz_newidle_balance()
 load_balance()
+
+Data structures:
+---------------
+
+struct task_struct
+struct task_group
+struct sched_entity
+struct sched_group
+struct sched_group_capacity
+struct sched_domain
+
+statistics tracking:
+struct sched_avg
+
+Load balancing stats:
+`struct sd_lb_stats`
+
+
+
+If CONFIG_SCHED_AUTOGROUP is set:
+struct autogroup
+    
+For every CPU c, a given task_group tg has a sched_entity called se and a run queue 
+cfs_rq associated with it.
+```
+    tg->se[c] = &se;
+    tg->cfs_rq[c] = &se->my_q;
+```
+So when a task belonging to tg migrates from CPUx to CPUy, it will be dequeued from tg->cfs_rq[x] 
+and enqueued on tg->cfs_rq[y].
+
+Time slice and Task Load
+------------------------
+
+Time slice is dependent:
+    - task's priority (0-139, the lower the more important)
+    - Nr of tasks of runqueue
+
+The prio itself is not enough - need to know the the load of the task to estimate its time slice. 
+prio_to_weight[] - maps prio to a weight
+(A priority number of 120, which is the priority of a normal task, is mapped to a load of 1024, 
+which is the value that the kernel uses to represent the capacity of a single standard CPU.)
+
+The weight of the task is stored here:
+```
+struct load_weight {
+	unsigned long			weight;
+	u32				inv_weight;
+}
+```
+
+A run queue `struct cfs_rq` is also characterized by a "weight" value that is 
+the accumulation of weights of all tasks on its run queue.
+
+```
+struct cfs_rq {
+	**struct load_weight	load;**
+	unsigned long		runnable_weight;
+	unsigned int		nr_running;
+	unsigned int		h_nr_running;      /* SCHED_{NORMAL,BATCH,IDLE} */
+	unsigned int		idle_h_nr_running; /* SCHED_IDLE */
+
+	u64			exec_clock;
+	u64			min_vruntime;
+    ...
+    /*
+	 *   h_load = weight * f(tg)
+	 *
+	 * Where f(tg) is the recursive weight fraction assigned to
+	 * this group.
+	 */
+	unsigned long		h_load;
+    ...
+}
+```
+
+#############################################################################
+                                                                            #
+The time slice can now be calculated as:                                    #
+By deviding the task's weight with the sum of all runnable task's weights.  #
+                                                                            #
+    time_slice = (sched_period() * se.load.weight) / cfs_rq.load.weight;    #
+                                                                            #
+##############################################################################
+
+
+Runtime and Task Load
+---------------------
+
+Which task to pick next? Red-black tree - pick the one with
+the lowest `vruntime`. Lowest vruntime found is stored in the queue on
+the `cfs_rq.min_vruntime`. Leftmost node of the rb tree is picked since
+that has the least amount of CPU time accumulated.
+
+################################################################################
+
+Every periodic tick the `vruntime` of the curr running task gets updated to:
+
+    `vruntime += delta_exec * (NICE_0_LOAD/curr->load.weight)`
+
+        - delta_exec: time spent since last time `vruntime` was updated
+        - NICE_O_LOAD: load of tas with NORMAL prio
+
+################################################################################
+
+`vruntime` progresses slowly of task with HIGH prio. This keeps it towards the
+left side of the rb tree.
+
+Load tracking metrics
+---------------------
+
+Goal: help estimate the nature (bursty/IO bound/cpu intensive) numerically.
+
+```
+struct sched_avg {
+	u32 runnable_sum, runnable_avg_period;
+	unsigned long load_avg_contrib;
+};
+```
+
+Calculates task load as the amount of time that the task was runnable during the time that it was alive.
+
+```
+// sa is the sched_avg
+sa.load_avg_contrib = (sa.runnable_sum * se.load.weight) / sa.runnable_period;
+```
+
+Therefore load_avg_contrib is the fraction of the time that the task was ready to run.
+
+So tasks showing peaks of activity after long periods of inactivity and tasks that are blocked on disk access (and thus non-runnable) most of the time have a smaller load_avg_contrib than CPU-intensive tasks such as code doing matrix multiplication.
+In the former case, runnable_sum would be a fraction of the runnable_period. In the latter, both these numbers would be equal (i.e. the task was runnable throughout the time that it was alive), identifying it as a high-load task.
+
+####################################################################################
+
+The load on a CPU is the **sum of the load_avg_contrib** of all the scheduling 
+entities on its run queue; it is accumulated in a field called **runnable_load_avg** 
+in the cfs_rq data structure.
+This is roughly a measure of **how heavily contended** the CPU is.
+
+####################################################################################
+
+
+
+Load tracing of task groups
+---------------------------
+
+Each cfs_rq has an associated `struct task_group` that "owns" this runqueue.
+
+cfs_rq->tg_load_contrib = cfs_rq->runnable_load_avg + cfs_rq->blocked_load_avg;
+tg->load_avg += cfs_rq->tg_load_contrib;
+
+Sched entity's load avg is calculated:
+se->avg.load_avg_contrib =
+	  (cfs_rq->tg_load_contrib * tg->shares / tg->load_avg);
+
+Maximum allowed load for the task group: 
+    - `tg->shares` is the maximum allowed load for the task group. 
+    This means that the load of a sched_entity should be a fraction of the shares of its parent task group, which is in proportion to the load of its children.
+
+********************************************************************************
+**tg->shares can be set by users to indicate the importance of a task group.****
+********************************************************************************
+
+
+Per-entity Load tracking (LWN article)
+------------------------
+
+Link: https://lwn.net/Articles/531853/
+
+Goal:
+     The Linux kernel's CPU scheduler has a challenging task: it must allocate access to the system's
+     processors in a way that is fair and responsive while maximizing system throughput and minimizing 
+     power consumption.
+
+
+Heuristics: past performance of the task to estimate the load.
+
+A process can contribute to load even if it is not actually running at the moment:
+    A process waiting for its turn in the CPU is an example.
+
+    (A long-running process that consumed vast amounts of processor time last week may have very modest needs at the moment; 
+    such a process is contributing very little to load now, despite its rather more demanding behavior in the past.)
+
+Group scheduling:
+
+    IMPORTANT:
+    When group scheduling is in use, though, **each control group has its own per-CPU run queue array.**
+    Helps the group scheduler allocate CPU time between control groups.
+
+**Per-entity load tracking** addresses these problems by pushing this tracking down to the level 
+of individual "scheduling entities". 
+    Scheduling entities:
+        - a process 
+        - or a control group full of processes
+
+An entity's contribution to the system load in a period 'p' is just the portion of that period that the entity was runnable.
+But non-runnable entities can also contribute to load!!
+
+Load balancing:
+    The most obvious target is likely to be **load balancing**: distributing the processes on the system so that
+    each CPU is carrying roughly the same load. If the kernel knows how much each process is contributing to system load,
+    it can easily calculate the effect of migrating that process to another CPU.
+
+
+
+
+
 
 Patches
 -------
 https://lkml.org/lkml/2019/9/19/92
 https://lkml.org/lkml/2018/12/6/1253
+inside the kernel_hacking/patches/sched_imbalance folder
 
 Links
 -----
 https://hal.archives-ouvertes.fr/hal-01295194/document
+https://lwn.net/Articles/639543/        --- Load tracking the scheduler
+https://lwn.net/Articles/531853/        ---- Per-entity load tracing
+https://lwn.net/Articles/428230/        ---- Bandwitdh control
 
 
 
 
 
 
+kernel/sched/fair.c:6804
 
-
-
-
-
+/**************************************************
+ * Fair scheduling class load-balancing methods.
+ *
+ * BASICS
+ *
+ * The purpose of load-balancing is to achieve the same basic fairness the
+ * per-CPU scheduler provides, namely provide a proportional amount of compute
+ * time to each task. This is expressed in the following equation:
+ *
+ *   W_i,n/P_i == W_j,n/P_j for all i,j                               (1)
+ *
+ * Where W_i,n is the n-th weight average for CPU i. The instantaneous weight
+ * W_i,0 is defined as:
+ *
+ *   W_i,0 = \Sum_j w_i,j                                             (2)
+ *
+ * Where w_i,j is the weight of the j-th runnable task on CPU i. This weight
+ * is derived from the nice value as per sched_prio_to_weight[].
+ *
+ * The weight average is an exponential decay average of the instantaneous
+ * weight:
+ *
+ *   W'_i,n = (2^n - 1) / 2^n * W_i,n + 1 / 2^n * W_i,0               (3)
+ *
+ * C_i is the compute capacity of CPU i, typically it is the
+ * fraction of 'recent' time available for SCHED_OTHER task execution. But it
+ * can also include other factors [XXX].
+ *
+ * To achieve this balance we define a measure of imbalance which follows
+ * directly from (1):
+ *
+ *   imb_i,j = max{ avg(W/C), W_i/C_i } - min{ avg(W/C), W_j/C_j }    (4)
+ *
+ * We them move tasks around to minimize the imbalance. In the continuous
+ * function space it is obvious this converges, in the discrete case we get
+ * a few fun cases generally called infeasible weight scenarios.
+ *
+ * [XXX expand on:
+ *     - infeasible weights;
+ *     - local vs global optima in the discrete case. ]
+ *
+ *
+ * SCHED DOMAINS
+ *
+ * In order to solve the imbalance equation (4), and avoid the obvious O(n^2)
+ * for all i,j solution, we create a tree of CPUs that follows the hardware
+ * topology where each level pairs two lower groups (or better). This results
+ * in O(log n) layers. Furthermore we reduce the number of CPUs going up the
+ * tree to only the first of the previous level and we decrease the frequency
+ * of load-balance at each level inv. proportional to the number of CPUs in
+ * the groups.
+ *
+ * This yields:
+ *
+ *     log_2 n     1     n
+ *   \Sum       { --- * --- * 2^i } = O(n)                            (5)
+ *     i = 0      2^i   2^i
+ *                               `- size of each group
+ *         |         |     `- number of CPUs doing load-balance
+ *         |         `- freq
+ *         `- sum over all levels
+ *
+ * Coupled with a limit on how many tasks we can migrate every balance pass,
+ * this makes (5) the runtime complexity of the balancer.
+ *
+ * An important property here is that each CPU is still (indirectly) connected
+ * to every other CPU in at most O(log n) steps:
+ *
+ * The adjacency matrix of the resulting graph is given by:
+ *
+ *             log_2 n
+ *   A_i,j = \Union     (i % 2^k == 0) && i / 2^(k+1) == j / 2^(k+1)  (6)
+ *             k = 0
+ *
+ * And you'll find that:
+ *
+ *   A^(log_2 n)_i,j != 0  for all i,j                                (7)
+ *
+ * Showing there's indeed a path between every CPU in at most O(log n) steps.
+ * The task movement gives a factor of O(m), giving a convergence complexity
+ * of:
+ *
+ *   O(nm log n),  n := nr_cpus, m := nr_tasks                        (8)
+ *
+ *
+ * WORK CONSERVING
+ *
+ * In order to avoid CPUs going idle while there's still work to do, new idle
+ * balancing is more aggressive and has the newly idle CPU iterate up the domain
+ * tree itself instead of relying on other CPUs to bring it work.
+ *
+ * This adds some complexity to both (5) and (8) but it reduces the total idle
+ * time.
+ *
+ * [XXX more?]
+ *
+ *
+ * CGROUPS
+ *
+ * Cgroups make a horror show out of (2), instead of a simple sum we get:
+ *
+ *                                s_k,i
+ *   W_i,0 = \Sum_j \Prod_k w_k * -----                               (9)
+ *                                 S_k
+ *
+ * Where
+ *
+ *   s_k,i = \Sum_j w_i,j,k  and  S_k = \Sum_i s_k,i                 (10)
+ *
+ * w_i,j,k is the weight of the j-th runnable task in the k-th cgroup on CPU i.
+ *
+ * The big problem is S_k, its a global sum needed to compute a local (W_i)
+ * property.
+ *
+ * [XXX write more on how we solve this.. _after_ merging pjt's patches that
+ *      rewrite all of this once again.]
+ */
 

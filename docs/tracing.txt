@@ -38,3 +38,9 @@ Trace scheduler events:
 $ echo sched:sched_switch > /sys/kernel/debug/tracing/set_event
 $ cat /sys/kernel/debug/tracing/trace_pipe > /tmp/sched_traces.txt
 $ cat /tmp/sched_traces.txt | awk '{print $11}' | awk -F'=' '{print $2}' | sort | uniq -c | less
+
+
+bpftrace
+========
+
+

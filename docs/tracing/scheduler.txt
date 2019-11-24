@@ -1,0 +1,6 @@
+Scheduler tracing
+=================
+
+Trace birth of new processes (print parent and child):
+
+sudo bpftrace -e 'tracepoint:sched:sched_process_fork { printf("parent: %s, %d -> child: %s, %d\n",args->parent_comm, args->parent_pid, args->child_comm, args->child_pid ); }'

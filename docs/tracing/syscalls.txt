@@ -1,0 +1,9 @@
+Print syscalls on system, except syscall number 1 (open)
+$ sudo bpftrace -e 'tracepoint:raw_syscalls:sys_enter /args->id != 1/ { printf("%d,%s\n", args->id, comm) }'
+
+Count syscall types:
+$ sudo bpftrace -e 'tracepoint:raw_syscalls:sys_enter { @[args->id]=count(); }'
+
+Syscalls per process:
+$ bpftrace -e 'tracepoint:raw_syscalls:sys_enter { @[comm] = count(); }'
+

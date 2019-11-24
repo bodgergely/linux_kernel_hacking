@@ -1,0 +1,7 @@
+perf stat -e migrations,sched:sched_migrate_task -I 1000
+
+bpftrace -e 't:sched:sched_migrate_task /args->orig_cpu != args->dest_cpu/ { @ = count(); } interval:s:1 { print(@); clear(@); }'
+
+perf record -e sched:sched_migrate_task
+
+bpftrace -e 't:sched:sched_migrate_task { @[pid] = count(); }'

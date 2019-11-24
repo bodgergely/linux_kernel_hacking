@@ -6,6 +6,9 @@ $ cd ~/workspace/linux
 $ patch -p1 < /tmp/patches/baba.patch
 
 
+Extract patch from source:
+git diff commit1..commit2 > mypatch.patch
+
 Patchwork
 ----------
 Grab patches from here:
@@ -19,3 +22,4 @@ Resources
 https://www.labbott.name/blog/2015/12/15/grabbing-kernel-patches-from-mailing-lists-and-the-internet/
 https://home.regit.org/technical-articles/git-for-the-newbie/
 https://www.youtube.com/watch?v=6zUVS4kJtrA         - GK Hartman shows how to apply patches 
+http://nickdesaulniers.github.io/blog/2017/05/16/submitting-your-first-patch-to-the-linux-kernel-and-responding-to-feedback/

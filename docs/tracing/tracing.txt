@@ -43,6 +43,12 @@ $ cat /tmp/sched_traces.txt | awk '{print $11}' | awk -F'=' '{print $2}' | sort 
 bpftrace
 ========
 
+List tracepoints with glob:
+$bpftrace -l 'tracepoint:syscalls:sys_enter_*'
+
+List all tracepoints: (then grep for the one you are looking for)
+$ bpftrace -l
+
 Print syscalls on system, except syscall number 1 (open)
 $ sudo bpftrace -e 'tracepoint:raw_syscalls:sys_enter /args->id != 1/ { printf("%d,%s\n", args->id, comm) }'
 

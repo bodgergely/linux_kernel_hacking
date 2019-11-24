@@ -48,3 +48,6 @@ $ sudo bpftrace -e 'tracepoint:raw_syscalls:sys_enter /args->id != 1/ { printf("
 
 Count syscall types:
 $ sudo bpftrace -e 'tracepoint:raw_syscalls:sys_enter { @[args->id]=count(); }'
+
+Syscalls per process:
+$ bpftrace -e 'tracepoint:raw_syscalls:sys_enter { @[comm] = count(); }'

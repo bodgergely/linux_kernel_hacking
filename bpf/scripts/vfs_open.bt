@@ -1,0 +1,8 @@
+#include <linux/path.h>
+#include <linux/dcache.h>
+
+kprobe:vfs_open
+{
+	printf("[%s] [%d] open path: %s\n", comm, pid, str(((path *)arg0)->dentry->d_name.name));
+}
+

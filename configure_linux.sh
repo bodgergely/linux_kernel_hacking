@@ -1,7 +1,14 @@
+#!/bin/bash
+BRANCH=master
+
+if [ ! -z $1 ]
+then
+    BRANCH=$1
+fi
+
 LINUX_SRC=$WORKSPACE/linux/
 BUSYBOX_DIR=$HOME/busybox
 
-BRANCH=master
 mkdir -p $BUSYBOX_DIR/build/linux-$BRANCH 
 
 cd $LINUX_SRC

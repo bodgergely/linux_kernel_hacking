@@ -3,6 +3,7 @@ General kernel doc
 ==================
 
 
+
 Links
 =====
 
@@ -176,3 +177,24 @@ https://www.linuxtopia.org/online_books/linux_kernel/kernel_configuration/ch09s0
 CONFIG_PREEMPT - for low latency
 it is usually not set for desktops CONFIG_PREEMTP_VOLUNTARY
 
+
+
+
+FAQ
+===
+
+(excerpt from Documentation/networking/netdev-FAQ.rst)
+
+Q: How often do changes from these trees make it to the mainline Linus tree?
+----------------------------------------------------------------------------
+A: To understand this, you need to know a bit of background information on
+the cadence of Linux development.  Each new release starts off with a
+two week "merge window" where the main maintainers feed their new stuff
+to Linus for merging into the mainline tree.  After the two weeks, the
+merge window is closed, and it is called/tagged ``-rc1``.  No new
+features get mainlined after this -- only fixes to the rc1 content are
+expected.  After roughly a week of collecting fixes to the rc1 content,
+rc2 is released.  This repeats on a roughly weekly basis until rc7
+(typically; sometimes rc6 if things are quiet, or rc8 if things are in a
+state of churn), and a week after the last vX.Y-rcN was done, the
+official vX.Y is released.

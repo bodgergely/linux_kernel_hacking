@@ -1,0 +1,2 @@
+alias r='./build-run.sh'
+alias b='./build.sh'

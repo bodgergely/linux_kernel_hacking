@@ -1,10 +1,10 @@
 #include <linux/module.h>
-#include <linux/kernel.h>
-#include <linux/slab.h>
-#include <linux/vmalloc.h>
-#include <linux/mm.h>
-#include <asm/unistd.h>
-#include <asm/page.h>
+// #include <linux/kernel.h>
+// #include <linux/slab.h>
+// #include <linux/vmalloc.h>
+// #include <linux/mm.h>
+// #include <asm/unistd.h>
+// #include <asm/page.h>
 #include <linux/syscalls.h>
 #include <linux/printk.h>
 

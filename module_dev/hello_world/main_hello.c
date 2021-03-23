@@ -1,11 +1,12 @@
-#include <linux/module.h>
-// #include <linux/kernel.h>
+#include <linux/module.h>       /* Needed by all modules, module_init, module_exit */
+#include <linux/kernel.h>       /* Needed for KERN_INFO */
+#include <linux/init.h>         /* Needed for macros */
 // #include <linux/slab.h>
 // #include <linux/vmalloc.h>
 // #include <linux/mm.h>
 // #include <asm/unistd.h>
 // #include <asm/page.h>
-#include <linux/syscalls.h>
+#include <linux/syscalls.h>     /* __init and __exit */
 #include <linux/printk.h>
 
 

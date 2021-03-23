@@ -1,0 +1,6 @@
+## Utilities
+
+- modprobe
+- modinfo
+- insmod
+- rmmod

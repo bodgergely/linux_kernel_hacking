@@ -5,5 +5,6 @@
 **.cache.mk
 **.tmp_versions/
 **.mod.c
+**.mod
 **/Module.symvers
 **/modules.order

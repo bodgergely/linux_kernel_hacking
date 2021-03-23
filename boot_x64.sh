@@ -1,5 +1,6 @@
 #!/bin/bash
-BRANCH=master
+# BRANCH=master
+BRANCH=`cat branch-linux`
 
 if [ ! -z $1 ]
 then

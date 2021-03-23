@@ -9,9 +9,9 @@
 #include <linux/printk.h>
 
 
-static void printk_test(void)
+static void greeting(void)
 {
-    printk(KERN_INFO "Hello World!\n");    
+    printk(KERN_INFO "Hello Marcika!\n");    
 }
 
 static void goodbye(void)
@@ -20,7 +20,7 @@ static void goodbye(void)
 }
 
 static int __init initmodule(void ){
-    printk_test();
+    greeting();
     return 0;       // must return 0 on success and nonzero on failure
 }
 

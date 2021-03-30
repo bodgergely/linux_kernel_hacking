@@ -1,2 +1,2 @@
-alias r='./build-run.sh'
-alias b='./build.sh'
+alias r='./build-run.sh hello_procfs'
+alias b='./build.sh hello_procfs'

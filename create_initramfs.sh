@@ -15,6 +15,10 @@ echo "mount -t sysfs none /sys" >> init
 echo "echo -e \"\nBoot took \$(cut -d' ' -f1 /proc/uptime) seconds\n\"" >> init
 echo "exec /bin/sh" >> init
 chmod +x init
+# create util scripts
+touch s
+printf '#!/bin/sh\npoweroff -f\n' >> s
+chmod +x s
 
 # create the compressed initramfs
 find . -print0 \

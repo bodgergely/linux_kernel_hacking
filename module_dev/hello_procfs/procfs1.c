@@ -5,11 +5,15 @@
 #include <linux/proc_fs.h>
 #include <linux/printk.h>
 #include <linux/syscalls.h>
+#include <asm/cpufeature.h>
 
 #define PROCFS_NAME "helloworld"
 
 // Holds information about the /proc file
 struct proc_dir_entry *Our_Proc_File;
+
+#define WRITE_BUFFER_SIZE 4096
+unsigned char write_buffer[WRITE_BUFFER_SIZE];
 
 /* Put data into the proc fs file.
 *
@@ -59,7 +63,7 @@ static ssize_t file_read(struct file *filp,
                         size_t length, 
                         loff_t *offset)
 {
-    int ret;
+    unsigned long ret;
     printk(KERN_INFO "procfile_read (/proc/%s) called with buff len: %d\n", 
         PROCFS_NAME, length);
     /*
@@ -81,12 +85,14 @@ static ssize_t file_read(struct file *filp,
     }
     else {
         // fill the buffer, return the buffer size
-        if(length) {
-            ret = snprintf(buff, length, msg);
-        }
-        else {
+        // we could also use put_user to copy from kernel to user space
+        // or copy_to_user
+        printk("copy_to_user calling...\n");
+        // ret = snprintf(buff, length, msg);
+        if(copy_to_user(buff, msg, strlen(msg) + 1) != 0)
             ret = 0;
-        }
+        else
+            ret = strlen(msg) + 1;
     }
 
     printk(KERN_INFO "procfile_read returning: %d\n", ret);
@@ -95,12 +101,34 @@ static ssize_t file_read(struct file *filp,
 
 }
 
+
+static ssize_t file_write(struct file *filp, 
+                        const char __user *buff, 
+                        size_t length, 
+                        loff_t *offset)
+{
+    ssize_t ret = 0;
+    size_t wrlen = length > WRITE_BUFFER_SIZE ? WRITE_BUFFER_SIZE : length;
+    if((ret = copy_from_user(write_buffer, buff + *offset, wrlen)) == 0) {
+        printk(KERN_INFO "Buffer contents: %s\n", write_buffer);
+        return wrlen;
+    }
+    else {
+        printk(KERN_ERR "Failed copy_from_user with err: %lu\n", ret);
+        return -ENOMEM;
+    }
+}
+
 static struct file_operations file = {
-    .read = file_read
+    .read = file_read,
+    .write = file_write
 };
 
 int init_module()
 {
+    if(boot_cpu_has(X86_FEATURE_SMAP)) {
+        printk(KERN_INFO "X86_FEATURE_SMAP is enabled");
+    }
     Our_Proc_File = proc_create(PROCFS_NAME, 0644, NULL, &file);
     if (Our_Proc_File == NULL) {
         remove_proc_entry(PROCFS_NAME, NULL);

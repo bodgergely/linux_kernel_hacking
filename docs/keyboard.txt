@@ -1,0 +1,42 @@
+How a character from the keyboard ends up on the screen?
+========================================================
+
+Kernel places typed char into a tty queue and tty will pick it up later.
+
+`n_tty_receive_buf_fast()` is called when kernel places the char to the tty buffer. `tty_buffer.c`
+`workqueue.c` `process_one_work()` calls that.
+
+
+include/linux/tty.h - tty_struct
+include/linux/tty_ldisc.h - tty line discipline
+drivers/tty/tty_io.c
+drivers/tty/n_tty.c
+
+
+
+
+These functions fetch the character from the `struct tty_ldisc` into the __user buffer.
+
+tty_read() calls:
+n_tty_read()
+
+
+include/linux/tty_ldisc.h:
+
+ *	This function instructs the line discipline to clear its
+ *	buffers of any input characters it may have queued to be
+ *	delivered to the user mode process.
+ *
+ * ssize_t (*read)(struct tty_struct * tty, struct file * file,
+ *		   unsigned char * buf, size_t nr);
+
+
+n_tty_read calls `copy_from_read_buf()` copies characters straight from the tty queue to user space directly.
+
+`struct tty_struct` has a member called `disc_data`. - include/linux/tty.h
+`disc_data` member is a type `struct n_tty_data` in n_tty.c
+This struct has member `read_buf` which contains the characters typed by the user.
+
+Someone had to call `put_tty_queue()` to place the char to the buffer of the tty.
+`n_tty_receive_buf_raw()` is the one or `n_tty_receive_char_fast()` or `n_tty_receive_buf_standard()`.
+

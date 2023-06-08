@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # helper functions defined in gdb-kernel-debugging.rst in Linux source code
-BRANCH=master
+BRANCH=`cat branch-linux`
 
 if [ ! -z $1 ]
 then
@@ -10,3 +10,5 @@ fi
 
 gdb --command qemu.gdb ~/busybox/build/linux-$BRANCH/vmlinux
 
+# Use below command in the booted virtual machine to shut it off
+# $poweroff -f

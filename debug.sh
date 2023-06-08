@@ -1,0 +1,1 @@
+/home/geri/workspace/hacking/kernel_hacking/gdb_vmlinux.sh

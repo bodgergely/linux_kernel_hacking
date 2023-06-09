@@ -1,6 +1,8 @@
 How a character from the keyboard ends up on the screen?
 ========================================================
 
+`8250_port.c` + `8250_core.c` is the 8250 serial tty driver reading the keyboard key presses.
+
 Kernel places typed char into a tty queue and tty will pick it up later.
 
 `n_tty_receive_buf_fast()` is called when kernel places the char to the tty buffer. `tty_buffer.c`
@@ -11,9 +13,6 @@ include/linux/tty.h - tty_struct
 include/linux/tty_ldisc.h - tty line discipline
 drivers/tty/tty_io.c
 drivers/tty/n_tty.c
-
-
-
 
 These functions fetch the character from the `struct tty_ldisc` into the __user buffer.
 
@@ -30,13 +29,88 @@ include/linux/tty_ldisc.h:
  * ssize_t (*read)(struct tty_struct * tty, struct file * file,
  *		   unsigned char * buf, size_t nr);
 
-
-n_tty_read calls `copy_from_read_buf()` copies characters straight from the tty queue to user space directly.
+`n_tty_read()` calls `copy_from_read_buf()` copies characters straight from the tty queue to user space directly.
 
 `struct tty_struct` has a member called `disc_data`. - include/linux/tty.h
 `disc_data` member is a type `struct n_tty_data` in n_tty.c
 This struct has member `read_buf` which contains the characters typed by the user.
 
 Someone had to call `put_tty_queue()` to place the char to the buffer of the tty.
-`n_tty_receive_buf_raw()` is the one or `n_tty_receive_char_fast()` or `n_tty_receive_buf_standard()`.
+`__receive_buf()`
+`n_tty_receive_buf_raw()` is the one or most probably! `n_tty_receive_char_fast()` or maybe `n_tty_receive_buf_standard()`.
 
+
+Producer (interrupt)
+====================
+
+`8250_port.c` has the lowest level input port query `in` x86 instuction.
+
+When key is pressed `do_IRQ()` is called which calls the below function:
+The interrupt related to keyboard seems to be the `serial8250_interrupt()` in
+`drivers/tty/serial/8250/8250_core.c`.
+This will call into `serial8250_default_handle_irq()` in `8250_port.c`.
+Then calls `serial8250_handle_irq()` -> `serial8250_rx_chars()` -> `serial8250_read_char()`
+and `serial_in()` will get the character.
+This char will be inserted to UART layer - `serial_core.c` tty/serial/serial_core.c
+`uart_serial_char()` into tty_buffer* in `tty_insert_flip_char()` in tty_buffer.c and tty_flip.h.
+Then tty_buffer* functions can be used to receive the characters like `tty_ldisc_receive_buf` in tty_buffer.c.
+
+
+Stacktraces
+===========
+
+Producer (key press)
+--------------------
+
+```
+(gdb) bt
+#0  serial8250_read_char (up=0xffffffff82b64da0 <serial8250_ports>, lsr=97 'a')
+    at /home/geri/workspace/linux/drivers/tty/serial/8250/8250_port.c:1652
+#1  0xffffffff81467986 in serial8250_rx_chars (up=0xffffffff82b64da0 <serial8250_ports>, lsr=<optimised out>)
+    at /home/geri/workspace/linux/drivers/tty/serial/8250/8250_port.c:1719
+#2  0xffffffff8146aa1c in serial8250_handle_irq (port=0xffffffff82b64da0 <serial8250_ports>, iir=204)
+    at /home/geri/workspace/linux/drivers/tty/serial/8250/8250_port.c:1850
+#3  0xffffffff8146aa96 in serial8250_handle_irq (iir=<optimised out>, port=<optimised out>)
+    at /home/geri/workspace/linux/drivers/tty/serial/8250/8250_port.c:1828
+#4  serial8250_default_handle_irq (port=0xffffffff82b64da0 <serial8250_ports>)
+    at /home/geri/workspace/linux/drivers/tty/serial/8250/8250_port.c:1871
+#5  0xffffffff81465a4c in serial8250_interrupt (irq=<optimised out>, dev_id=0xffff888006e1f3e0)
+    at /home/geri/workspace/linux/drivers/tty/serial/8250/8250_core.c:126
+#6  0xffffffff810b055d in __handle_irq_event_percpu (desc=<optimised out>, flags=0xffffc90000003f8c)
+    at /home/geri/workspace/linux/kernel/irq/handle.c:149
+#7  0xffffffff810b06bc in handle_irq_event_percpu (desc=0xffff888006c36000) at /home/geri/workspace/linux/kernel/irq/handle.c:189
+#8  0xffffffff810b0733 in handle_irq_event (desc=0xffff888006c36000) at /home/geri/workspace/linux/kernel/irq/handle.c:206
+#9  0xffffffff810b42a9 in handle_edge_irq (desc=0xffff888006c36000) at /home/geri/workspace/linux/kernel/irq/chip.c:833
+#10 0xffffffff81c01823 in generic_handle_irq_desc (desc=<optimised out>) at /home/geri/workspace/linux/include/linux/irqdesc.h:156
+#11 do_IRQ (regs=<optimised out>) at /home/geri/workspace/linux/arch/x86/kernel/irq.c:250
+#12 0xffffffff81c00a0f in common_interrupt () at /home/geri/workspace/linux/arch/x86/entry/entry_64.S:607
+#13 0xffffffff82403df8 in init_thread_union ()
+Backtrace stopped: Cannot access memory at address 0xffffc90000004000
+(gdb)
+```
+
+Consumer (vi in insert mode picking up the key pressed saved to tty buffer)
+----------------------------
+/dev/console
+
+```
+Breakpoint 12, n_tty_read (tty=0xffff888007bb3000, file=0xffff888007bc8600, buf=0x1ad1f09 "a74;141R", nr=1)
+    at /home/geri/workspace/linux/drivers/tty/n_tty.c:2134
+(gdb) bt
+#0  n_tty_read (tty=0xffff888007bb3000, file=0xffff888007bc8600, buf=0x1ad1f09 "a74;141R", nr=1)
+    at /home/geri/workspace/linux/drivers/tty/n_tty.c:2134
+#1  0xffffffff81445381 in tty_read (file=0xffff888007bc8600, buf=0x1ad1f09 "a74;141R", count=1, ppos=<optimised out>)
+    at /home/geri/workspace/linux/drivers/tty/tty_io.c:868
+#2  0xffffffff811bf7d8 in vfs_read (pos=<optimised out>, count=<optimised out>, buf=<optimised out>, file=<optimised out>)
+    at /home/geri/workspace/linux/fs/read_write.c:461
+#3  vfs_read (file=0xffff888007bc8600, buf=0x1ad1f09 "a74;141R", count=1, pos=0xffffc900001a7f08)
+    at /home/geri/workspace/linux/fs/read_write.c:446
+#4  0xffffffff811bfafa in ksys_read (fd=<optimised out>, buf=0x1ad1f09 "a74;141R", count=1)
+    at /home/geri/workspace/linux/fs/read_write.c:587
+#5  0xffffffff81002193 in do_syscall_64 (nr=<optimised out>, regs=0xffffc900001a7f58)
+    at /home/geri/workspace/linux/arch/x86/entry/common.c:290
+#6  0xffffffff81c0007c in entry_SYSCALL_64 () at /home/geri/workspace/linux/arch/x86/entry/entry_64.S:175
+#7  0x0000000000000000 in ?? ()
+(gdb)
+
+```

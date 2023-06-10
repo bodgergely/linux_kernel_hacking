@@ -26,6 +26,13 @@ cd /tmp/kernel-extract/
 sudo /usr/src/linux-headers-$(uname -r)/scripts/extract-vmlinux vmlinuz-$(uname -r) > vmlinux
 
 
+Syscalls (system calls)
+=======================
+
+arch/x86/entry/syscalls/syscall_64.tbl
+
+
+
 Softirq
 =======
 interrupt.h

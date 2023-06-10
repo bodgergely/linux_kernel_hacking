@@ -1,0 +1,30 @@
+generate man pages for kernel functions
+=======================================
+
+Link:https://elinux.org/Editor_Tips
+
+Using kernel man pages with VIM
+You can create man pages for kernel functions using the script named kernel-doc which can be found under the scripts directory:
+
+$ ./scripts/kernel-doc -man $(find -name '*.c') | ./scripts/split-man.pl /tmp/man
+$ ./scripts/kernel-doc -man $(find -name '*.h') | ./scripts/split-man.pl /tmp/man
+The above has been tested on kernel version 4.19
+
+For older kernel versions
+You can create man pages for kernel functions using the kernel build system:
+
+$ make mandocs
+$ sudo make installmandocs
+The first command builds the kernel man pages, and the second installs them (usually into /usr/local/share/man/man9) As of kernel version 4.4, "make mandocs" will take a long time to complete (about 45 minutes on my machine).
+
+Once the kernel man pages are installed, you can access them from the command line with:
+
+$ man <symbol>
+If the symbol is found in other places than the kernel (such as in libc or in some other man pages), you can add the man section number for the kernel, which is '9'.
+
+$ man 9 <symbol>
+For example:
+
+$ man printk
+$ man 9 abs
+To see the kernel man page for a symbol under the cursor in vim, use Shift-K

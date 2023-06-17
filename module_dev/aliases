@@ -1,2 +1,2 @@
-alias r='./build-run.sh char_dev'
-alias b='./build.sh char_dev'
+alias r="$PWD/build-run.sh"
+alias b="$PWD/build.sh"

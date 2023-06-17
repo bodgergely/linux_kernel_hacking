@@ -8,7 +8,7 @@ fi
 MODULE=$1
 
 export TOP=~/busybox/
-../create_initramfs.sh
+#../create_initramfs.sh
 
 cp ./$MODULE/$MODULE.ko $TOP/build/initramfs/busybox-x86/
 rm $TOP/build/initramfs-busybox-x86.cpio.gz
